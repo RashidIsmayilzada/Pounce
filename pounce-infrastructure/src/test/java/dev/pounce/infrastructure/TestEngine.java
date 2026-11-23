@@ -13,8 +13,11 @@ import java.util.List;
 record TestEngine(Indexer indexer, Searcher searcher, LucenePassageIndex index) {
 
     static TestEngine over(Path folder) {
+        return over(folder, new HashingEmbedder());
+    }
+
+    static TestEngine over(Path folder, dev.pounce.application.Embedder embedder) {
         var index = LucenePassageIndex.inMemory();
-        var embedder = new HashingEmbedder();
         var indexer = new Indexer(List.of(new WatchedFolder(folder)), Exclusions.defaults(folder.resolve("no-home")),
                 new PlainTextExtractor(), new PassageSplitter(), embedder, index);
         return new TestEngine(indexer, new Searcher(embedder, index), index);

@@ -6,7 +6,8 @@ import dev.pounce.domain.Query;
 import dev.pounce.domain.Result;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.analysis.CharArraySet;
+import org.apache.lucene.analysis.en.EnglishAnalyzer;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 import org.apache.lucene.codecs.KnnVectorsFormat;
 import org.apache.lucene.codecs.lucene104.Lucene104Codec;
@@ -64,7 +65,13 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
     private static final int CANDIDATES = 20;
     private static final int RRF_K = 60;
 
-    private final Analyzer analyzer = new StandardAnalyzer();
+    /**
+     * English stemming, minus filler words. Lucene's English stop list leaves out question words and pronouns,
+     * which nearly every note contains, so they are added here.
+     */
+    private static final CharArraySet FILLER_WORDS = fillerWords();
+
+    private final Analyzer analyzer = new EnglishAnalyzer(FILLER_WORDS);
     private final Snippets snippets = new Snippets(PATH, TEXT, analyzer, new TermQuery(new Term(KIND, "document")));
     private final IndexWriter writer;
     private final SearcherManager searchers;
@@ -86,6 +93,17 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    private static CharArraySet fillerWords() {
+        var words = new CharArraySet(EnglishAnalyzer.ENGLISH_STOP_WORDS_SET, true);
+        words.addAll(List.of(
+                "how", "what", "why", "when", "where", "which", "who", "whom",
+                "do", "does", "did", "doing", "done", "can", "could", "should", "would", "shall", "may", "might",
+                "i", "me", "my", "mine", "we", "us", "our", "ours", "you", "your", "yours",
+                "he", "him", "his", "she", "her", "hers", "its", "them",
+                "am", "been", "being", "has", "have", "had", "about", "from", "so", "than", "too", "very"));
+        return CharArraySet.unmodifiableSet(words);
     }
 
     public static LucenePassageIndex inMemory() {
@@ -175,17 +193,22 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
         return wordsQuery(TEXT, query);
     }
 
-    /** Any of the Query's words in the field; the last word also matches as a prefix (the user may be mid-word). */
+    /**
+     * The Query's words in the field; the last word also matches as a prefix (the user may be mid-word).
+     * Short Queries need one word to match. Longer ones need at least half, so a single shared word cannot
+     * make a Keyword Match that outranks a strong Semantic Match.
+     */
     private org.apache.lucene.search.Query wordsQuery(String field, Query query) {
         List<String> words = analyze(query.text());
         if (words.isEmpty()) {
             return new MatchNoDocsQuery();
         }
-        var any = new BooleanQuery.Builder();
+        var enough = new BooleanQuery.Builder();
         for (int i = 0; i < words.size(); i++) {
-            any.add(term(field, words.get(i), i == words.size() - 1), BooleanClause.Occur.SHOULD);
+            enough.add(term(field, words.get(i), i == words.size() - 1), BooleanClause.Occur.SHOULD);
         }
-        return any.build();
+        enough.setMinimumNumberShouldMatch(words.size() < 3 ? 1 : (words.size() + 1) / 2);
+        return enough.build();
     }
 
     private static org.apache.lucene.search.Query term(String field, String word, boolean prefix) {
