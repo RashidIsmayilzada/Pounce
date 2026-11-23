@@ -17,12 +17,13 @@ final class LauncherDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         startBundledEngine()
         menu = StatusMenu(supervisor: supervisor, onSearch: { [weak self] in self?.toggle() })
-        let view = LauncherView(model: model, onOpen: { [weak self] in self?.open($0) })
+        let view = LauncherView(model: model, onOpen: { [weak self] in self?.open($0) },
+                                onHeightChange: { [weak self] in self?.panel?.fit(contentHeight: $0) })
         let hosting = NSHostingView(rootView: view)
         hosting.sizingOptions = [.preferredContentSize]
         panel = LauncherPanel(content: hosting)
         panel.previewItem = { [weak self] in self?.model.selected.map { URL(fileURLWithPath: $0.path) } }
-        hotKey = HotKey.optionSpace { [weak self] in self?.toggle() }
+        hotKey = HotKey.named(Configuration.hotKeyName) { [weak self] in self?.toggle() }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             self?.handle(event) ?? event
         }
@@ -47,7 +48,13 @@ final class LauncherDelegate: NSObject, NSApplicationDelegate {
         Task { await supervisor.start() }
     }
 
+    private var lastToggle = Date.distantPast
+
     private func toggle() {
+        // A held shortcut repeats; only the first press counts.
+        guard Date().timeIntervalSince(lastToggle) > 0.35 else { return }
+        lastToggle = Date()
+        launcherLog.notice("toggle: panel visible \(self.panel.isVisible), app active \(NSApp.isActive)")
         if panel.isVisible {
             panel.orderOut(nil)
         } else {
