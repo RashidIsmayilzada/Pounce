@@ -88,6 +88,22 @@ class EngineApiTest {
     }
 
     @Test
+    void a_file_saved_while_the_engine_runs_becomes_searchable() throws Exception {
+        a_file_on_disk_when_the_engine_starts_becomes_searchable();
+        String token = token();
+
+        Files.writeString(WATCHED.resolve("falconry.md"), "# Falconry\nThe falcon returned to the glove.");
+
+        Instant deadline = Instant.now().plusSeconds(10);
+        String body = "";
+        while (Instant.now().isBefore(deadline) && !body.contains("falconry.md")) {
+            body = search("falcon glove", token).body();
+            Thread.sleep(200);
+        }
+        assertThat(body).contains("falconry.md");
+    }
+
+    @Test
     void a_search_streams_early_results_then_final_results() throws Exception {
         a_file_on_disk_when_the_engine_starts_becomes_searchable();
 
