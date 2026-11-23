@@ -1,0 +1,61 @@
+# Points the Homebrew cask (github.com/RashidIsmayilzada/homebrew-tap) at a published release.
+# Runs after each release; can also be run by hand from the Actions tab for a version that's already released.
+# Needs the TAP_DEPLOY_KEY secret: the private half of a deploy key with write access to homebrew-tap only.
+name: Update Homebrew tap
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+    secrets:
+      TAP_DEPLOY_KEY:
+        required: true
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Released version, e.g. 0.1.0'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  cask:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read the release checksum
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          version="${VERSION#v}"
+          sha=$(gh release download "v$version" -R "$GITHUB_REPOSITORY" -p '*.sha256' -O - | awk '{print $1}')
+          [[ "$sha" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::No checksum found for release v$version"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v5
+        with:
+          repository: RashidIsmayilzada/homebrew-tap
+          ssh-key: ${{ secrets.TAP_DEPLOY_KEY }}
+          path: tap
+
+      - name: Update and push the cask
+        working-directory: tap
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          sed -i -E "s/^  version \".*\"/  version \"$VERSION\"/; s/^  sha256 \".*\"/  sha256 \"$SHA\"/" Casks/pounce.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "The cask already points at $VERSION; checking the key can still push."
+            git push --dry-run origin HEAD
+            exit 0
+          fi
+          git commit -am "pounce $VERSION"
+          git push origin HEAD
