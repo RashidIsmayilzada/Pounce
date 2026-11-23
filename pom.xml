@@ -25,7 +25,7 @@
     <lucene.version>10.6.0</lucene.version>
     <onnxruntime.version>1.32.0</onnxruntime.version>
     <djl.version>0.40.0</djl.version>
-    <archunit.version>1.4.1</archunit.version>
+    <archunit.version>1.5.1</archunit.version>
   </properties>
 
   <dependencyManagement>
