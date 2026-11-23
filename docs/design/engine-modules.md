@@ -1,8 +1,22 @@
 # Engine module design
 
-How the Engine is cut into modules, where the seams are, and what each interface promises. Vocabulary follows [GLOSSARY.md](../../GLOSSARY.md); architecture rules follow [ADR-0005](../adr/0005-onion-layers-as-maven-modules.md).
+How the Engine is cut into modules, where the seams are, and what each interface promises. Architecture rules follow [ADR-0005](../adr/0005-onion-layers-as-maven-modules.md).
 
-Status: **draft**, updated after [the stack research](../research/2026-11-23-tech-stack-verification.md); still waiting on the speed prototype.
+Status: implemented in 0.1.0; based on [the stack research](../research/2026-11-23-tech-stack-verification.md) and [the speed measurements](../research/2026-11-23-speed-spike-verdict.md).
+
+## Terms
+
+| Term | Meaning |
+|---|---|
+| **Watched Folder** | A folder the user chose to keep searchable, with everything beneath it |
+| **Exclusion** | A rule that keeps paths out of the Index (dependency, build and hidden folders, files over 50 MB) |
+| **Document** | One file in the Index, counted once however many paths lead to it |
+| **Passage** | A stretch of a Document's text (about 400 tokens); the unit that is matched |
+| **Query** | What the user typed |
+| **Keyword Match / Semantic Match** | A Document matched by shared words / by closeness in meaning |
+| **Early / Final Results** | Keyword Matches shown instantly, then replaced by both kinds merged |
+| **Snippet** | The best Passage of a Result, shortened, with the Query's words highlighted |
+| **Engine / Launcher** | The background Java service / the ⌥Space search panel |
 
 Verified stack: Java 25, Spring Boot 4.2 (Spring Security 7.2, Jackson 3, JUnit 6), Lucene 10.6, ONNX Runtime Java 1.32 (CPU provider — CoreML was slower), PDFBox, picocli, ArchUnit, JMH, `directory-watcher`, Maven 3.10. GC: G1 with a small max heap, not ZGC (lower idle footprint).
 
