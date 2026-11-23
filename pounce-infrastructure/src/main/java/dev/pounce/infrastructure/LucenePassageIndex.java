@@ -39,6 +39,7 @@ import org.apache.lucene.search.join.ScoreMode;
 import org.apache.lucene.search.join.ToParentBlockJoinQuery;
 import org.apache.lucene.store.ByteBuffersDirectory;
 import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.FSDirectory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -89,6 +90,15 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
 
     public static LucenePassageIndex inMemory() {
         return new LucenePassageIndex(new ByteBuffersDirectory());
+    }
+
+    /** Opens (or creates) the Index stored in this folder. */
+    public static LucenePassageIndex open(Path folder) {
+        try {
+            return new LucenePassageIndex(FSDirectory.open(folder));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     @Override
