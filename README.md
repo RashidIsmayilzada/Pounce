@@ -20,9 +20,15 @@ Spotlight finds `certificate-renewal.md` when you type "certificate". Pounce als
 
 ## Install
 
-Download `Pounce-<version>-macos-arm64.zip` from [Releases](../../releases), unzip it and move `Pounce.app` to `/Applications`.
+With [Homebrew](https://brew.sh):
 
-Releases are not notarized yet, so the first time macOS will say it can't check Pounce for malware: right-click `Pounce.app` → **Open** → **Open**. macOS then asks for access to the folders Pounce watches.
+```bash
+brew install --cask rashidismayilzada/tap/pounce
+```
+
+Or download `Pounce-<version>-macos-arm64.zip` from [Releases](https://github.com/RashidIsmayilzada/Pounce/releases), unzip it and move `Pounce.app` to `/Applications`.
+
+Pounce is not notarized yet, so the first time macOS will say it can't verify the developer: right-click `Pounce.app` → **Open** → **Open** (or *System Settings → Privacy & Security → Open Anyway*). macOS then asks for access to the folders Pounce watches. Press **⌥Space** to search.
 
 Pounce watches `~/Documents`, `~/Desktop`, `~/Downloads` and `~/projects` by default. To change that, edit `~/Library/Application Support/Pounce/pounce.yml` and restart Pounce from its menu-bar icon:
 
