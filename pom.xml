@@ -53,4 +53,24 @@
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
     <dependency><groupId>org.assertj</groupId><artifactId>assertj-core</artifactId><scope>test</scope></dependency>
   </dependencies>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <configuration>
+            <!-- Lucene SIMD + quiet native-access warnings (JEP 472); see docs/research. -->
+            <argLine>--add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED</argLine>
+            <!-- The Engine makes no network calls: keep DJL offline and its telemetry off. -->
+            <environmentVariables>
+              <DJL_OFFLINE>true</DJL_OFFLINE>
+              <OPT_OUT_TRACKING>true</OPT_OUT_TRACKING>
+            </environmentVariables>
+          </configuration>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+  </build>
 </project>
