@@ -10,7 +10,7 @@ import dev.pounce.domain.WatchedFolder;
 import dev.pounce.infrastructure.FolderWatcher;
 import dev.pounce.infrastructure.LucenePassageIndex;
 import dev.pounce.infrastructure.OnnxEmbedder;
-import dev.pounce.infrastructure.PlainTextExtractor;
+import dev.pounce.infrastructure.FileTypeTextExtractor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -46,7 +46,7 @@ class EngineConfiguration {
         return new Indexer(
                 properties.watchedFolders().stream().map(WatchedFolder::new).toList(),
                 Exclusions.defaults(Path.of(System.getProperty("user.home"))),
-                new PlainTextExtractor(), new PassageSplitter(), embedder, index);
+                new FileTypeTextExtractor(), new PassageSplitter(), embedder, index);
     }
 
     @Bean

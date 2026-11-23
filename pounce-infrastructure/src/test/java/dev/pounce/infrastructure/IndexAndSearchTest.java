@@ -116,6 +116,17 @@ class IndexAndSearchTest {
     }
 
     @Test
+    void a_pdf_is_found_by_the_words_inside_it() throws IOException {
+        TestPdfs.write(folder.resolve("cluster.pdf"), "Kubernetes upgrade checklist for the production cluster");
+        engine.indexer().reconcile();
+
+        Result top = engine.searcher().search(Query.of("kubernetes upgrade"), Phase.FINAL).getFirst();
+
+        assertThat(top.path()).isEqualTo(folder.resolve("cluster.pdf"));
+        assertThat(highlighted(top.snippet())).containsExactly("Kubernetes", "upgrade");
+    }
+
+    @Test
     void deleting_a_folder_forgets_every_file_inside_it() throws IOException {
         write("project/notes.md", "canary one");
         write("project/deep/plan.md", "canary two");
