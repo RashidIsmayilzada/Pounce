@@ -7,6 +7,11 @@ import SwiftUI
 final class LauncherPanel: NSPanel, @preconcurrency QLPreviewPanelDataSource {
 
     var previewItem: (() -> URL?) = { nil }
+    /// Called whenever the panel hides, however it was closed, so the next open starts fresh.
+    var onHide: () -> Void = {}
+
+    /// Posted each time the panel is shown, so the search field can take keyboard focus again.
+    static let didShow = Notification.Name("dev.pounce.panelDidShow")
 
     init(content: NSView) {
         super.init(contentRect: NSRect(x: 0, y: 0, width: 680, height: 420),
@@ -41,6 +46,7 @@ final class LauncherPanel: NSPanel, @preconcurrency QLPreviewPanelDataSource {
                             width: size.width, height: size.height), display: true)
         }
         makeKeyAndOrderFront(nil)
+        NotificationCenter.default.post(name: Self.didShow, object: self)
         launcherLog.notice("panel shown: key \(self.isKeyWindow), visible \(self.isVisible), app active \(NSApp.isActive)")
         let screenFrame = screen?.frame ?? .zero
         launcherLog.notice("panel frame \(NSStringFromRect(self.frame), privacy: .public) on screen \(NSStringFromRect(screenFrame), privacy: .public), active space \(self.isOnActiveSpace), occlusion visible \(self.occlusionState.contains(.visible)), alpha \(self.alphaValue), content fitting \(NSStringFromSize(self.contentView?.fittingSize ?? .zero), privacy: .public)")
@@ -77,9 +83,11 @@ final class LauncherPanel: NSPanel, @preconcurrency QLPreviewPanelDataSource {
     }
 
     override func orderOut(_ sender: Any?) {
+        let wasVisible = isVisible
         super.orderOut(sender)
         if let outsideClicks { NSEvent.removeMonitor(outsideClicks) }
         outsideClicks = nil
+        if wasVisible { onHide() }
     }
 
     // MARK: Quick Look

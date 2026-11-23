@@ -23,6 +23,8 @@ final class LauncherDelegate: NSObject, NSApplicationDelegate {
         hosting.sizingOptions = [.preferredContentSize]
         panel = LauncherPanel(content: hosting)
         panel.previewItem = { [weak self] in self?.model.selected.map { URL(fileURLWithPath: $0.path) } }
+        // Every open starts with an empty search bar; clearing while hidden also shrinks the panel back.
+        panel.onHide = { [weak self] in self?.model.query = "" }
         hotKey = HotKey.named(Configuration.hotKeyName) { [weak self] in self?.toggle() }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             self?.handle(event) ?? event

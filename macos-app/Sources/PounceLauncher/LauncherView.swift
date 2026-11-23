@@ -66,6 +66,7 @@ struct LauncherView: View {
                 .onChange(of: proxy.size.height) { _, height in onHeightChange(height) }
         })
         .onAppear { fieldFocused = true }
+        .onReceive(NotificationCenter.default.publisher(for: LauncherPanel.didShow)) { _ in fieldFocused = true }
     }
 }
 
