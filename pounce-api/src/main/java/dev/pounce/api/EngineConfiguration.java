@@ -7,6 +7,7 @@ import dev.pounce.application.Searcher;
 import dev.pounce.domain.Exclusions;
 import dev.pounce.domain.PassageSplitter;
 import dev.pounce.domain.WatchedFolder;
+import dev.pounce.infrastructure.FolderWatcher;
 import dev.pounce.infrastructure.LucenePassageIndex;
 import dev.pounce.infrastructure.OnnxEmbedder;
 import dev.pounce.infrastructure.PlainTextExtractor;
@@ -51,6 +52,12 @@ class EngineConfiguration {
     @Bean
     Searcher searcher(Embedder embedder, PassageIndex index) {
         return new Searcher(embedder, index);
+    }
+
+    /** Live changes: created before the startup reconcile runs, so nothing saved during it is missed. */
+    @Bean(destroyMethod = "close")
+    FolderWatcher folderWatcher(PounceProperties properties, Indexer indexer) {
+        return FolderWatcher.start(properties.watchedFolders(), indexer::refresh);
     }
 
     /** Catch up with changes made while the Engine was not running, without delaying startup. */

@@ -116,6 +116,36 @@ class IndexAndSearchTest {
     }
 
     @Test
+    void deleting_a_folder_forgets_every_file_inside_it() throws IOException {
+        write("project/notes.md", "canary one");
+        write("project/deep/plan.md", "canary two");
+        write("keep.md", "canary three");
+        engine.indexer().reconcile();
+
+        try (var paths = Files.walk(folder.resolve("project"))) {
+            paths.sorted(java.util.Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
+        }
+        engine.indexer().refresh(folder.resolve("project"));
+
+        assertThat(engine.searcher().search(Query.of("canary"), Phase.FINAL))
+                .extracting(Result::path)
+                .containsExactly(folder.resolve("keep.md"));
+    }
+
+    @Test
+    void a_folder_moved_in_has_every_file_inside_it_indexed() throws IOException {
+        engine.indexer().reconcile();
+
+        write("incoming/notes.md", "canary one");
+        write("incoming/deep/plan.md", "canary two");
+        engine.indexer().refresh(folder.resolve("incoming"));
+
+        assertThat(engine.searcher().search(Query.of("canary"), Phase.FINAL))
+                .extracting(Result::path)
+                .containsExactlyInAnyOrder(folder.resolve("incoming/notes.md"), folder.resolve("incoming/deep/plan.md"));
+    }
+
+    @Test
     void a_result_shows_the_passage_that_matched_with_the_query_words_highlighted() throws IOException {
         write("runbook.md", "# Deploy\nShip the canary first.\n# Rollback\nIf errors rise, revert the helm release.");
         engine.indexer().reconcile();

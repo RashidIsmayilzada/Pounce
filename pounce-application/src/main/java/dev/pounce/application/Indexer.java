@@ -50,7 +50,8 @@ public final class Indexer {
             }
         }
         for (Path document : index.documents()) {
-            if (!onDisk.contains(document)) {
+            // Re-check the disk: the file may have been created (and indexed by a live refresh) after the walk.
+            if (!onDisk.contains(document) && !Files.exists(document)) {
                 index.remove(document);
             }
         }
@@ -64,13 +65,38 @@ public final class Indexer {
         }
     }
 
-    /** Make the Index agree with whatever is on disk at this path right now. */
-    public void refresh(Path path) {
+    /**
+     * Make the Index agree with whatever is on disk at this path right now: a file, a folder (everything beneath
+     * it), or a path that no longer exists (forget it and everything that was beneath it).
+     * Calls are serialised, so a live change and the startup reconcile never interleave on the same file.
+     */
+    public synchronized void refresh(Path path) {
         try {
             if (!Files.exists(path)) {
-                index.remove(lastKnownLocation(path));
-                return;
+                forget(lastKnownLocation(path));
+            } else if (Files.isDirectory(path)) {
+                try (Stream<Path> files = Files.walk(path)) {
+                    files.filter(Files::isRegularFile).forEach(this::refreshFile);
+                }
+            } else {
+                refreshFile(path);
             }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private void forget(Path gone) {
+        index.remove(gone);
+        for (Path document : index.documents()) {
+            if (document.startsWith(gone)) {
+                index.remove(document);
+            }
+        }
+    }
+
+    private void refreshFile(Path path) {
+        try {
             Path file = path.toRealPath();
             if (exclusions.excludes(file, Files.size(file))) {
                 return;
