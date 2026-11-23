@@ -94,6 +94,10 @@ scripts/smoke-app.sh            # checks the built app on a temporary folder
 - Better ranking for Markdown with front matter, and a calibrated relevance cut-off
 - Developer ID signing and notarization
 
+## Contributing
+
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for the setup and the rules, open an issue before larger changes, then send a pull request from your fork; CI runs every test on it. Please report security problems privately as described in [SECURITY.md](SECURITY.md), and follow the [code of conduct](CODE_OF_CONDUCT.md).
+
 ## License
 
 [MIT](LICENSE)

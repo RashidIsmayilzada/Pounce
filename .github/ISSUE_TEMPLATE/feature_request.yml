@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest an idea for Pounce
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would it solve?
+      placeholder: When I search for…, I can't…
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+  - type: checkboxes
+    id: offline
+    attributes:
+      label: Privacy
+      options:
+        - label: The idea works without sending anything off the Mac
+          required: true

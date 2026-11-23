@@ -1,0 +1,45 @@
+name: Bug report
+description: Something in Pounce doesn't work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting! Please don't paste private file contents; describe the kind of file instead.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: I pressed ⌥Space, searched "tax return" and expected my PDF, but…
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. …
+        2. …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Pounce version
+      description: From the release you downloaded, or `pounce --version`
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and Mac
+      placeholder: macOS 26.5, MacBook Air M2 8 GB
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Engine log (optional)
+      description: The last lines of `~/Library/Application Support/Pounce/logs/engine.log`. Check it for private paths first.
+      render: text
