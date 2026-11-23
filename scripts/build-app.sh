@@ -9,8 +9,9 @@ OUT="$ROOT/build"
 APP="$OUT/Pounce.app"
 JAVA_HOME="${JAVA_HOME_25:-$HOME/.sdkman/candidates/java/25.0.5.1+2-tem}"
 export JAVA_HOME
-# From `jdeps --print-module-deps` over the Engine jar, plus extra charsets for PDFs and zipfs.
-MODULES="java.base,java.compiler,java.desktop,java.instrument,java.management,java.naming,java.net.http,java.prefs,java.scripting,java.security.jgss,java.sql,jdk.incubator.vector,jdk.jfr,jdk.unsupported,jdk.charsets,jdk.zipfs"
+# From `jdeps --print-module-deps` over the Engine jar, plus charsets for PDFs, zipfs, and jdk.management
+# (Lucene reads HotSpot settings through it; without it Lucene logs that it cannot optimize).
+MODULES="java.base,java.compiler,java.desktop,java.instrument,java.management,java.naming,java.net.http,java.prefs,java.scripting,java.security.jgss,java.sql,jdk.incubator.vector,jdk.jfr,jdk.unsupported,jdk.charsets,jdk.zipfs,jdk.management"
 MODEL="$ROOT/models/bge-small-en-v1.5"
 
 step() { printf '\n==> %s\n' "$*"; }
