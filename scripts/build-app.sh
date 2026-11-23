@@ -13,6 +13,7 @@ export JAVA_HOME
 # (Lucene reads HotSpot settings through it; without it Lucene logs that it cannot optimize).
 MODULES="java.base,java.compiler,java.desktop,java.instrument,java.management,java.naming,java.net.http,java.prefs,java.scripting,java.security.jgss,java.sql,jdk.incubator.vector,jdk.jfr,jdk.unsupported,jdk.charsets,jdk.zipfs,jdk.management"
 MODEL="$ROOT/models/bge-small-en-v1.5"
+VERSION="${POUNCE_VERSION:-0.1.0}"   # set by the release workflow
 
 step() { printf '\n==> %s\n' "$*"; }
 
@@ -49,7 +50,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleDisplayName</key><string>Pounce</string>
   <key>CFBundleExecutable</key><string>Pounce</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
