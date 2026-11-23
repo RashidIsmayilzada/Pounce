@@ -1,0 +1,14 @@
+server:
+  address: 127.0.0.1   # never reachable from other machines
+  port: 7431
+spring:
+  main:
+    banner-mode: off
+  threads:
+    virtual:
+      enabled: true
+pounce:
+  home: ${user.home}/Library/Application Support/Pounce
+  watched-folders: ${user.home}/Documents,${user.home}/Desktop,${user.home}/Downloads,${user.home}/projects
+  model-dir: ${pounce.home}/models/bge-small-en-v1.5
+  token-lifetime: 15m
