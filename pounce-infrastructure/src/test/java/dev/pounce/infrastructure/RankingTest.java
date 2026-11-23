@@ -87,6 +87,17 @@ class RankingTest {
         }
     }
 
+    @ParameterizedTest(name = "\"{0}\" → nothing")
+    @CsvSource(textBlock = """
+            xyzzyplugh
+            qwfp zxcv
+            purple elephant violin
+            medieval falconry techniques
+            """)
+    void a_query_unrelated_to_every_document_has_no_results(String query) {
+        assertThat(engine.searcher().search(Query.of(query), Phase.FINAL)).isEmpty();
+    }
+
     @Test
     @Disabled("Known limit of bge-small: on meaning alone it rates apps-to-try.md 0.79 and the ADR below 0.64, "
             + "so no blend with Keyword Matches can rank the ADR first. Needs a stronger model or a reranker.")

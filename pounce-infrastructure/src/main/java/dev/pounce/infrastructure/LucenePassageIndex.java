@@ -66,6 +66,16 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
     private static final int RRF_K = 60;
 
     /**
+     * Semantic Matches below this cosine similarity are dropped, so a Query unrelated to everything gets no Results.
+     * Calibrated on the RankingTest corpus with bge-small-en-v1.5: correct Top Results scored 0.59–0.82,
+     * unrelated or nonsense Queries at most 0.51. Revisit with a larger labelled set.
+     */
+    static final float MIN_SIMILARITY = 0.55f;
+
+    /** Lucene scores DOT_PRODUCT vectors as (1 + cosine) / 2. */
+    private static final float MIN_VECTOR_SCORE = (1 + MIN_SIMILARITY) / 2;
+
+    /**
      * English stemming, minus filler words. Lucene's English stop list leaves out question words and pronouns,
      * which nearly every note contains, so they are added here.
      */
@@ -216,17 +226,22 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
         return prefix ? new PrefixQuery(term) : new TermQuery(term);
     }
 
-    /** The kNN query returns the best child per parent; RRF fuses by doc id, so map each child to its parent. */
+    /**
+     * The kNN query returns the best child per parent; RRF fuses by doc id, so map each child to its parent.
+     * Children below the minimum similarity are dropped: they are the nearest Documents, not near ones.
+     */
     private TopDocs toParents(IndexReader reader, TopDocs children) throws IOException {
         var leaves = reader.leaves();
-        var mapped = new ScoreDoc[children.scoreDocs.length];
-        for (int i = 0; i < mapped.length; i++) {
-            ScoreDoc child = children.scoreDocs[i];
+        List<ScoreDoc> mapped = new ArrayList<>();
+        for (ScoreDoc child : children.scoreDocs) {
+            if (child.score < MIN_VECTOR_SCORE) {
+                continue;
+            }
             var leaf = leaves.get(ReaderUtil.subIndex(child.doc, leaves));
             int parent = parents.getBitSet(leaf).nextSetBit(child.doc - leaf.docBase);
-            mapped[i] = new ScoreDoc(leaf.docBase + parent, child.score);
+            mapped.add(new ScoreDoc(leaf.docBase + parent, child.score));
         }
-        return new TopDocs(children.totalHits, mapped);
+        return new TopDocs(children.totalHits, mapped.toArray(ScoreDoc[]::new));
     }
 
     private List<Result> results(IndexSearcher searcher, TopDocs top, org.apache.lucene.search.Query textQuery)
