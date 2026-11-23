@@ -83,7 +83,8 @@ final class LauncherDelegate: NSObject, NSApplicationDelegate {
 
     private func open(_ item: ResultItem) {
         panel.orderOut(nil)
-        NSWorkspace.shared.open(URL(fileURLWithPath: item.path))
+        let obsidianInstalled = NSWorkspace.shared.urlForApplication(toOpen: URL(string: "obsidian://open")!) != nil
+        NSWorkspace.shared.open(OpenTarget.url(for: item.path, obsidianInstalled: obsidianInstalled))
     }
 
     private func reveal(_ item: ResultItem) {
