@@ -5,6 +5,40 @@
   <modelVersion>4.0.0</modelVersion>
   <parent><groupId>dev.pounce</groupId><artifactId>pounce</artifactId><version>0.1.0-SNAPSHOT</version></parent>
   <artifactId>pounce-cli</artifactId>
+  <description>The `pounce` terminal command. Talks to the Engine over HTTP only; depends on no Engine module.</description>
+  <properties>
+    <!-- No Java 25 features needed: runs on any JDK 21+, including the default `java` on most Macs. -->
+    <maven.compiler.release>21</maven.compiler.release>
+  </properties>
   <dependencies>
+    <dependency><groupId>info.picocli</groupId><artifactId>picocli</artifactId><version>4.7.7</version></dependency>
+    <dependency><groupId>tools.jackson.core</groupId><artifactId>jackson-databind</artifactId></dependency>
   </dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <version>3.6.0</version>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals><goal>shade</goal></goals>
+            <configuration>
+              <finalName>pounce</finalName>
+              <createDependencyReducedPom>false</createDependencyReducedPom>
+              <transformers>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                  <mainClass>dev.pounce.cli.Pounce</mainClass>
+                </transformer>
+              </transformers>
+              <filters>
+                <filter><artifact>*:*</artifact><excludes><exclude>META-INF/*.SF</exclude><exclude>META-INF/*.DSA</exclude><exclude>META-INF/*.RSA</exclude><exclude>META-INF/MANIFEST.MF</exclude></excludes></filter>
+              </filters>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
 </project>
