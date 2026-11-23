@@ -6,6 +6,7 @@ import SwiftUI
 struct LauncherView: View {
     @Bindable var model: SearchModel
     var onOpen: (ResultItem) -> Void = { _ in }
+    var onHeightChange: (CGFloat) -> Void = { _ in }
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
@@ -47,6 +48,11 @@ struct LauncherView: View {
         .frame(width: 680)
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(GeometryReader { proxy in
+            Color.clear
+                .onAppear { onHeightChange(proxy.size.height) }
+                .onChange(of: proxy.size.height) { _, height in onHeightChange(height) }
+        })
         .onAppear { fieldFocused = true }
     }
 }

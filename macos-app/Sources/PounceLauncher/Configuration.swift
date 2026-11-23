@@ -3,6 +3,9 @@ import PounceKit
 
 /// Where the Engine is: POUNCE_URL and POUNCE_HOME override the defaults, as for the `pounce` command.
 enum Configuration {
+    /// POUNCE_HOTKEY: option-space (default), control-option-space or command-option-space.
+    static var hotKeyName: String { ProcessInfo.processInfo.environment["POUNCE_HOTKEY"] ?? "option-space" }
+
     static func engine() -> HTTPEngineClient {
         let environment = ProcessInfo.processInfo.environment
         let defaults = HTTPEngineClient.local()
