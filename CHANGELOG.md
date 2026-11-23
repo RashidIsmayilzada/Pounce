@@ -2,6 +2,18 @@
 
 Notable changes to Pounce. The release workflow uses each version's section as its release notes.
 
+## [Unreleased]
+
+### Added
+
+- App search: matching applications appear first, like Spotlight (exact name, name start, word start, initials), and ⏎ launches them.
+- Markdown inside an Obsidian vault opens in Obsidian.
+
+### Fixed
+
+- ⌥Space opened an invisible panel (0 x 0 points) and, after a search, reopened the old search instead of an empty bar.
+- Restarting Pounce re-read every file; unchanged files are now skipped.
+
 ## [0.1.0] - 2026-11-23
 
 First release.

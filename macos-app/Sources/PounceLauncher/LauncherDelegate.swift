@@ -7,7 +7,7 @@ import SwiftUI
 @MainActor
 final class LauncherDelegate: NSObject, NSApplicationDelegate {
 
-    private let model = SearchModel(engine: Configuration.engine())
+    private let model = SearchModel(engine: Configuration.engine(), apps: FolderAppSource.standard)
     private var panel: LauncherPanel!
     private var hotKey: HotKey?
     private var keyMonitor: Any?
@@ -22,13 +22,14 @@ final class LauncherDelegate: NSObject, NSApplicationDelegate {
         let hosting = NSHostingView(rootView: view)
         hosting.sizingOptions = [.preferredContentSize]
         panel = LauncherPanel(content: hosting)
-        panel.previewItem = { [weak self] in self?.model.selected.map { URL(fileURLWithPath: $0.path) } }
+        panel.previewItem = { [weak self] in self?.model.selected.map { URL(fileURLWithPath: Self.path(of: $0)) } }
         // Every open starts with an empty search bar; clearing while hidden also shrinks the panel back.
         panel.onHide = { [weak self] in self?.model.query = "" }
         hotKey = HotKey.named(Configuration.hotKeyName) { [weak self] in self?.toggle() }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             self?.handle(event) ?? event
         }
+        Task { await model.reloadApps() }
         print("Pounce Launcher ready: press ⌥Space")
     }
 
@@ -60,6 +61,7 @@ final class LauncherDelegate: NSObject, NSApplicationDelegate {
         if panel.isVisible {
             panel.orderOut(nil)
         } else {
+            Task { await model.reloadApps() }   // pick up apps installed or removed since last time
             panel.showCentered()
         }
     }
@@ -83,15 +85,27 @@ final class LauncherDelegate: NSObject, NSApplicationDelegate {
         return nil
     }
 
-    private func open(_ item: ResultItem) {
+    private func open(_ item: SearchModel.Item) {
         panel.orderOut(nil)
-        let obsidianInstalled = NSWorkspace.shared.urlForApplication(toOpen: URL(string: "obsidian://open")!) != nil
-        NSWorkspace.shared.open(OpenTarget.url(for: item.path, obsidianInstalled: obsidianInstalled))
+        switch item {
+        case .app(let app):
+            NSWorkspace.shared.open(URL(fileURLWithPath: app.path))
+        case .file(let file):
+            let obsidianInstalled = NSWorkspace.shared.urlForApplication(toOpen: URL(string: "obsidian://open")!) != nil
+            NSWorkspace.shared.open(OpenTarget.url(for: file.path, obsidianInstalled: obsidianInstalled))
+        }
     }
 
-    private func reveal(_ item: ResultItem) {
+    private func reveal(_ item: SearchModel.Item) {
         panel.orderOut(nil)
-        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: item.path)])
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: Self.path(of: item))])
+    }
+
+    private static func path(of item: SearchModel.Item) -> String {
+        switch item {
+        case .app(let app): app.path
+        case .file(let file): file.path
+        }
     }
 
     private func togglePreview() {

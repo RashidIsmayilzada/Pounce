@@ -2,10 +2,10 @@ import AppKit
 import PounceKit
 import SwiftUI
 
-/// The search panel: a big search field, then the Results with their Snippets.
+/// The search panel: a big search field, then matching applications, then the Results with their Snippets.
 struct LauncherView: View {
     @Bindable var model: SearchModel
-    var onOpen: (ResultItem) -> Void = { _ in }
+    var onOpen: (SearchModel.Item) -> Void = { _ in }
     var onHeightChange: (CGFloat) -> Void = { _ in }
     /// For offscreen rendering (snapshots, the demo video): draw this text and a cursor instead of the live field,
     /// which the offscreen renderer cannot draw.
@@ -21,12 +21,12 @@ struct LauncherView: View {
                     .foregroundStyle(.secondary)
                 if let renderedQuery {
                     (renderedQuery.isEmpty
-                        ? Text("Search your files").foregroundColor(.secondary)
+                        ? Text("Search apps and files").foregroundColor(.secondary)
                         : Text(renderedQuery) + Text("|").foregroundColor(.accentColor))
                         .font(.system(size: 22))
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    TextField("Search your files", text: $model.query)
+                    TextField("Search apps and files", text: $model.query)
                         .textFieldStyle(.plain)
                         .font(.system(size: 22))
                         .focused($fieldFocused)
@@ -38,20 +38,31 @@ struct LauncherView: View {
             .padding(.horizontal, 18)
             .frame(height: 56)
 
-            if let message = model.message {
+            if !model.apps.isEmpty || !model.results.isEmpty || model.message != nil {
                 Divider()
-                Text(message)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(18)
-            } else if !model.results.isEmpty {
-                Divider()
-                VStack(spacing: 2) {
-                    ForEach(Array(model.results.enumerated()), id: \.element.id) { index, item in
-                        ResultRow(item: item, selected: index == model.selection, displayPath: displayPath)
-                            .contentShape(Rectangle())
-                            .onTapGesture { model.selection = index; onOpen(item) }
+                VStack(alignment: .leading, spacing: 2) {
+                    if !model.apps.isEmpty {
+                        sectionTitle("Applications")
+                        ForEach(Array(model.apps.enumerated()), id: \.element.id) { index, app in
+                            AppRow(app: app, selected: index == model.selection)
+                                .contentShape(Rectangle())
+                                .onTapGesture { model.selection = index; onOpen(.app(app)) }
+                        }
+                    }
+                    if let message = model.message {
+                        Text(message)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                    } else if !model.results.isEmpty {
+                        if !model.apps.isEmpty { sectionTitle("Files") }
+                        ForEach(Array(model.results.enumerated()), id: \.element.id) { index, item in
+                            let row = model.apps.count + index
+                            ResultRow(item: item, selected: row == model.selection, displayPath: displayPath)
+                                .contentShape(Rectangle())
+                                .onTapGesture { model.selection = row; onOpen(.file(item)) }
+                        }
                     }
                 }
                 .padding(6)
@@ -67,6 +78,37 @@ struct LauncherView: View {
         })
         .onAppear { fieldFocused = true }
         .onReceive(NotificationCenter.default.publisher(for: LauncherPanel.didShow)) { _ in fieldFocused = true }
+    }
+}
+
+private func sectionTitle(_ title: String) -> some View {
+    Text(title)
+        .font(.system(size: 11, weight: .semibold))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.top, 6)
+}
+
+/// An application: its icon and name, like Spotlight's top hits.
+struct AppRow: View {
+    let app: AppEntry
+    let selected: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: app.path))
+                .resizable()
+                .frame(width: 32, height: 32)
+            Text(app.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+            Spacer(minLength: 0)
+            if selected {
+                Text("Open").font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(selected ? Color.accentColor.opacity(0.22) : .clear,
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
