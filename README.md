@@ -26,6 +26,8 @@ With [Homebrew](https://brew.sh):
 brew install --cask rashidismayilzada/tap/pounce
 ```
 
+To use the short name, add the tap once: `brew tap rashidismayilzada/tap && brew trust rashidismayilzada/tap`; after that `brew install pounce` and `brew upgrade pounce` work.
+
 Or download `Pounce-<version>-macos-arm64.zip` from [Releases](https://github.com/RashidIsmayilzada/Pounce/releases), unzip it and move `Pounce.app` to `/Applications`.
 
 Pounce is not notarized yet, so the first time macOS will say it can't verify the developer: right-click `Pounce.app` → **Open** → **Open** (or *System Settings → Privacy & Security → Open Anyway*). macOS then asks for access to the folders Pounce watches. Press **⌥Space** to search.
