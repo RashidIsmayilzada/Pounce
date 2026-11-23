@@ -17,6 +17,11 @@ if let flag = arguments.firstIndex(of: "--snapshot"), arguments.count > flag + 2
     }
 } else {
     app.setActivationPolicy(.accessory)
+    // Quit cleanly (stopping the Engine) on SIGTERM, e.g. from `kill` or logout.
+    signal(SIGTERM, SIG_IGN)
+    let terminate = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+    terminate.setEventHandler { MainActor.assumeIsolated { NSApp.terminate(nil) } }
+    terminate.resume()
     let delegate = MainActor.assumeIsolated { LauncherDelegate() }
     app.delegate = delegate
     app.run()

@@ -11,8 +11,12 @@ final class LauncherDelegate: NSObject, NSApplicationDelegate {
     private var panel: LauncherPanel!
     private var hotKey: HotKey?
     private var keyMonitor: Any?
+    private var supervisor: EngineSupervisor?
+    private var menu: StatusMenu?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        startBundledEngine()
+        menu = StatusMenu(supervisor: supervisor, onSearch: { [weak self] in self?.toggle() })
         let view = LauncherView(model: model, onOpen: { [weak self] in self?.open($0) })
         let hosting = NSHostingView(rootView: view)
         hosting.sizingOptions = [.preferredContentSize]
@@ -23,6 +27,24 @@ final class LauncherDelegate: NSObject, NSApplicationDelegate {
             self?.handle(event) ?? event
         }
         print("Pounce Launcher ready: press ⌥Space")
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        supervisor?.stop()
+    }
+
+    /// Inside Pounce.app the Launcher owns the bundled Engine; run from `swift run`, the Engine is started by hand.
+    private func startBundledEngine() {
+        guard let resources = Bundle.main.resourceURL,
+              FileManager.default.fileExists(atPath: resources.appendingPathComponent("engine/pounce-engine.jar").path)
+        else { return }
+        let layout = EngineLayout.bundled(resources: resources)
+        let supervisor = EngineSupervisor(
+            layout: layout,
+            starter: FoundationProcessStarter(log: layout.home.appendingPathComponent("logs/engine.log")),
+            probe: HTTPEngineProbe(baseURL: Configuration.engine().baseURL))
+        self.supervisor = supervisor
+        Task { await supervisor.start() }
     }
 
     private func toggle() {
