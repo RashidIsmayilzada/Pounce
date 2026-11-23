@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Runs the `pounce` command from this checkout. Needs Java 21+.
+# Settings: POUNCE_URL (default http://127.0.0.1:7431), POUNCE_HOME (folder holding the bootstrap secret), NO_COLOR.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+JAR="$ROOT/pounce-cli/target/pounce.jar"
+[ -f "$JAR" ] || { echo "pounce isn't built yet: run 'mvn -pl pounce-cli package' in $ROOT" >&2; exit 2; }
+exec java -XX:TieredStopAtLevel=1 -Xshare:auto -jar "$JAR" "$@"
