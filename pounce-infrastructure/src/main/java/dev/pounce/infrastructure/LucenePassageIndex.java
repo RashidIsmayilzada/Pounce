@@ -64,6 +64,7 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
     private static final int RRF_K = 60;
 
     private final Analyzer analyzer = new StandardAnalyzer();
+    private final Snippets snippets = new Snippets(PATH, TEXT, analyzer, new TermQuery(new Term(KIND, "document")));
     private final IndexWriter writer;
     private final SearcherManager searchers;
     private final BitSetProducer parents = new QueryBitSetProducer(new TermQuery(new Term(KIND, "document")));
@@ -130,7 +131,8 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
 
     @Override
     public List<Result> keyword(Query query) {
-        return withSearcher(searcher -> results(searcher, searcher.search(keywordQuery(query), query.limit())));
+        return withSearcher(searcher ->
+                results(searcher, searcher.search(keywordQuery(query), query.limit()), textQuery(query)));
     }
 
     @Override
@@ -140,7 +142,8 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
             TopDocs semantic = toParents(searcher.getIndexReader(), searcher.search(
                     new DiversifyingChildrenFloatKnnVectorQuery(VECTOR, queryVector, null, CANDIDATES, parents),
                     CANDIDATES));
-            return results(searcher, TopDocs.rrf(query.limit(), RRF_K, new TopDocs[]{keyword, semantic}));
+            return results(searcher, TopDocs.rrf(query.limit(), RRF_K, new TopDocs[]{keyword, semantic}),
+                    textQuery(query));
         });
     }
 
@@ -151,21 +154,28 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
     }
 
     private org.apache.lucene.search.Query keywordQuery(Query query) {
+        return new BooleanQuery.Builder()
+                .add(new ToParentBlockJoinQuery(textQuery(query), parents, ScoreMode.Max), BooleanClause.Occur.SHOULD)
+                .add(new BoostQuery(wordsQuery(NAME, query), 2f), BooleanClause.Occur.SHOULD)
+                .build();
+    }
+
+    /** The Query's words against Passage text; matches Passages, not Documents. */
+    private org.apache.lucene.search.Query textQuery(Query query) {
+        return wordsQuery(TEXT, query);
+    }
+
+    /** Any of the Query's words in the field; the last word also matches as a prefix (the user may be mid-word). */
+    private org.apache.lucene.search.Query wordsQuery(String field, Query query) {
         List<String> words = analyze(query.text());
         if (words.isEmpty()) {
             return new MatchNoDocsQuery();
         }
-        var inText = new BooleanQuery.Builder();
-        var inName = new BooleanQuery.Builder();
+        var any = new BooleanQuery.Builder();
         for (int i = 0; i < words.size(); i++) {
-            boolean last = i == words.size() - 1;
-            inText.add(term(TEXT, words.get(i), last), BooleanClause.Occur.SHOULD);
-            inName.add(term(NAME, words.get(i), last), BooleanClause.Occur.SHOULD);
+            any.add(term(field, words.get(i), i == words.size() - 1), BooleanClause.Occur.SHOULD);
         }
-        return new BooleanQuery.Builder()
-                .add(new ToParentBlockJoinQuery(inText.build(), parents, ScoreMode.Max), BooleanClause.Occur.SHOULD)
-                .add(new BoostQuery(inName.build(), 2f), BooleanClause.Occur.SHOULD)
-                .build();
+        return any.build();
     }
 
     private static org.apache.lucene.search.Query term(String field, String word, boolean prefix) {
@@ -186,11 +196,13 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
         return new TopDocs(children.totalHits, mapped);
     }
 
-    private static List<Result> results(IndexSearcher searcher, TopDocs top) throws IOException {
+    private List<Result> results(IndexSearcher searcher, TopDocs top, org.apache.lucene.search.Query textQuery)
+            throws IOException {
         var stored = searcher.storedFields();
         List<Result> results = new ArrayList<>();
         for (ScoreDoc hit : top.scoreDocs) {
-            results.add(new Result(Path.of(stored.document(hit.doc).get(PATH))));
+            String path = stored.document(hit.doc).get(PATH);
+            results.add(new Result(Path.of(path), snippets.of(searcher, path, textQuery)));
         }
         return results;
     }

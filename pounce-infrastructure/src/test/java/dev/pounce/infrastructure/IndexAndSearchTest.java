@@ -3,6 +3,7 @@ package dev.pounce.infrastructure;
 import dev.pounce.application.Phase;
 import dev.pounce.domain.Query;
 import dev.pounce.domain.Result;
+import dev.pounce.domain.Snippet;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -111,6 +113,54 @@ class IndexAndSearchTest {
         engine.indexer().reconcile();
 
         assertThat(engine.searcher().search(Query.of("canary"), Phase.EARLY)).isEmpty();
+    }
+
+    @Test
+    void a_result_shows_the_passage_that_matched_with_the_query_words_highlighted() throws IOException {
+        write("runbook.md", "# Deploy\nShip the canary first.\n# Rollback\nIf errors rise, revert the helm release.");
+        engine.indexer().reconcile();
+
+        Snippet snippet = engine.searcher().search(Query.of("revert helm"), Phase.EARLY).getFirst().snippet();
+
+        assertThat(snippet.text()).contains("If errors rise, revert the helm release.").doesNotContain("canary");
+        assertThat(highlighted(snippet)).containsExactly("revert", "helm");
+    }
+
+    @Test
+    void a_long_passage_is_cut_down_to_the_part_around_the_match() throws IOException {
+        String filler = "lorem ipsum dolor sit amet ".repeat(25); // ~675 characters, no sentence breaks
+        write("log.txt", filler + "then the kubernetes node restarted " + filler);
+        engine.indexer().reconcile();
+
+        Snippet snippet = engine.searcher().search(Query.of("kubernetes"), Phase.EARLY).getFirst().snippet();
+
+        assertThat(snippet.text().length()).isLessThanOrEqualTo(Snippets.MAX_LENGTH);
+        assertThat(snippet.text()).contains("then the kubernetes node restarted");
+        assertThat(highlighted(snippet)).containsExactly("kubernetes");
+    }
+
+    @Test
+    void a_document_found_by_its_name_shows_the_start_of_its_text() throws IOException {
+        write("canary-plan.md", "Shift ten percent of traffic first, then watch the error rate.");
+        engine.indexer().reconcile();
+
+        Snippet snippet = engine.searcher().search(Query.of("canary"), Phase.EARLY).getFirst().snippet();
+
+        assertThat(snippet.text()).isEqualTo("Shift ten percent of traffic first, then watch the error rate.");
+        assertThat(snippet.highlights()).isEmpty();
+    }
+
+    @Test
+    void a_document_without_readable_text_has_an_empty_snippet() throws IOException {
+        Files.write(folder.resolve("scanned-passport.pdf"), new byte[]{(byte) 0xFF, (byte) 0xFE, 0, 1, 2});
+        engine.indexer().reconcile();
+
+        assertThat(engine.searcher().search(Query.of("passport"), Phase.EARLY).getFirst().snippet())
+                .isEqualTo(Snippet.NONE);
+    }
+
+    private static List<String> highlighted(Snippet snippet) {
+        return snippet.highlights().stream().map(h -> snippet.text().substring(h.start(), h.end())).toList();
     }
 
     private void write(String name, String text) throws IOException {
