@@ -29,7 +29,7 @@ jobs:
           cache: maven
 
       - name: Cache the embedding model
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: models
           key: model-bge-small-en-v1.5-int8-${{ hashFiles('scripts/fetch-model.sh') }}
