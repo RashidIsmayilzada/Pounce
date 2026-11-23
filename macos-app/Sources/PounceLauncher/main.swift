@@ -9,7 +9,13 @@ import PounceKit
 let arguments = CommandLine.arguments
 let app = NSApplication.shared
 
-if let flag = arguments.firstIndex(of: "--snapshot"), arguments.count > flag + 2 {
+if let flag = arguments.firstIndex(of: "--demo-frames"), arguments.count > flag + 2 {
+    let folder = URL(fileURLWithPath: arguments[flag + 1])
+    let shownRoot = arguments[flag + 2]
+    MainActor.assumeIsolated {
+        Demo.render(to: folder, shownRoot: shownRoot, engine: Configuration.engine())
+    }
+} else if let flag = arguments.firstIndex(of: "--snapshot"), arguments.count > flag + 2 {
     let output = URL(fileURLWithPath: arguments[flag + 1])
     let query = arguments[(flag + 2)...].joined(separator: " ")
     MainActor.assumeIsolated {

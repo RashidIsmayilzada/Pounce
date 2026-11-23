@@ -2,7 +2,9 @@
 
 **Private, on-device semantic search for macOS.** Press a shortcut, start typing, and find your files by what they *say*, not only by their name. Everything runs on your Mac: no cloud, no API calls.
 
-<!-- Screenshot: docs/images/launcher.png -->
+![Pounce finding an annual statement by meaning, then a recipe](docs/media/pounce-demo.gif)
+
+<sub>Real search results over a sample folder of fictional documents. [MP4 version](docs/media/pounce-demo.mp4).</sub>
 
 Spotlight finds `certificate-renewal.md` when you type "certificate". Pounce also finds it when you type *"how do I renew the ssl cert"*, because it compares meaning, while still matching exact words like error codes and file names.
 

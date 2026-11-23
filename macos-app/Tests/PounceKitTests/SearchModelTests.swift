@@ -19,6 +19,21 @@ struct SearchModelTests {
 
         try await eventually { model.results.map(\.name) == ["rollout.md", "runbook.md"] }
         #expect(model.isFinal)
+        #expect(model.shownQuery == "canary")
+    }
+
+    @Test func while_a_new_query_runs_the_shown_results_are_marked_as_belonging_to_the_old_one() async throws {
+        let model = SearchModel(engine: engine)
+        model.query = "can"
+        try await eventually { engine.isSearching("can") }
+        engine.send(.final([item("cannon.md")]), to: "can")
+        try await eventually { model.isFinal }
+
+        model.query = "canary"
+
+        #expect(!model.isFinal)
+        #expect(model.shownQuery == "can")
+        #expect(model.results.map(\.name) == ["cannon.md"])
     }
 
     @Test func a_new_keystroke_drops_the_results_of_the_previous_query() async throws {

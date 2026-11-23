@@ -7,6 +7,10 @@ struct LauncherView: View {
     @Bindable var model: SearchModel
     var onOpen: (ResultItem) -> Void = { _ in }
     var onHeightChange: (CGFloat) -> Void = { _ in }
+    /// For offscreen rendering (snapshots, the demo video): draw this text and a cursor instead of the live field,
+    /// which the offscreen renderer cannot draw.
+    var renderedQuery: String?
+    var displayPath: (String) -> String = { ($0 as NSString).abbreviatingWithTildeInPath }
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
@@ -15,10 +19,18 @@ struct LauncherView: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 20, weight: .medium))
                     .foregroundStyle(.secondary)
-                TextField("Search your files", text: $model.query)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 22))
-                    .focused($fieldFocused)
+                if let renderedQuery {
+                    (renderedQuery.isEmpty
+                        ? Text("Search your files").foregroundColor(.secondary)
+                        : Text(renderedQuery) + Text("|").foregroundColor(.accentColor))
+                        .font(.system(size: 22))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    TextField("Search your files", text: $model.query)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 22))
+                        .focused($fieldFocused)
+                }
                 if !model.query.isEmpty && !model.isFinal {
                     ProgressView().controlSize(.small)
                 }
@@ -37,7 +49,7 @@ struct LauncherView: View {
                 Divider()
                 VStack(spacing: 2) {
                     ForEach(Array(model.results.enumerated()), id: \.element.id) { index, item in
-                        ResultRow(item: item, selected: index == model.selection)
+                        ResultRow(item: item, selected: index == model.selection, displayPath: displayPath)
                             .contentShape(Rectangle())
                             .onTapGesture { model.selection = index; onOpen(item) }
                     }
@@ -46,7 +58,7 @@ struct LauncherView: View {
             }
         }
         .frame(width: 680)
-        .background(.regularMaterial)
+        .background(renderedQuery == nil ? AnyShapeStyle(.regularMaterial) : AnyShapeStyle(Color(white: 0.97)))
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .background(GeometryReader { proxy in
             Color.clear
@@ -60,6 +72,7 @@ struct LauncherView: View {
 struct ResultRow: View {
     let item: ResultItem
     let selected: Bool
+    var displayPath: (String) -> String = { ($0 as NSString).abbreviatingWithTildeInPath }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -69,7 +82,7 @@ struct ResultRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(item.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
-                    Text(abbreviated(item.path)).font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text(displayPath(item.path)).font(.system(size: 11)).foregroundStyle(.secondary)
                         .lineLimit(1).truncationMode(.middle)
                 }
                 if !item.snippet.text.isEmpty {
@@ -87,12 +100,10 @@ struct ResultRow: View {
     /// The Snippet with matched words in bold and full-strength colour.
     private var snippet: Text {
         item.snippet.runs.reduce(Text("")) { text, run in
-            let clean = run.text.replacingOccurrences(of: "\n", with: " ")
+            // PDFs pad columns with runs of spaces; show them as one.
+            let clean = run.text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             return text + (run.highlighted ? Text(clean).bold().foregroundColor(.primary) : Text(clean))
         }
     }
 
-    private func abbreviated(_ path: String) -> String {
-        (path as NSString).abbreviatingWithTildeInPath
-    }
 }

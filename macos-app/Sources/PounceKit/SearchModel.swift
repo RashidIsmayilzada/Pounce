@@ -11,7 +11,10 @@ public final class SearchModel {
         didSet { if query != oldValue { start() } }
     }
     public private(set) var results: [ResultItem] = []
+    /// True once the Final Results for the current `query` are shown; false while a newer search is running.
     public private(set) var isFinal = false
+    /// The Query the shown Results belong to (lags behind `query` while a new search runs).
+    public private(set) var shownQuery = ""
     public private(set) var message: String?
     public var selection: Int = 0
 
@@ -35,9 +38,10 @@ public final class SearchModel {
         current?.cancel()
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
-            show([], final: true, message: nil)
+            show([], for: "", final: true, message: nil)
             return
         }
+        isFinal = false
         let stream = engine.search(text, limit: limit)
         current = Task { [weak self] in
             do {
@@ -45,20 +49,21 @@ public final class SearchModel {
                     guard !Task.isCancelled else { return }
                     switch phase {
                     case .early(let items):
-                        self?.show(items, final: false, message: nil)
+                        self?.show(items, for: text, final: false, message: nil)
                     case .final(let items):
-                        self?.show(items, final: true, message: items.isEmpty ? "No results for \u{201C}\(text)\u{201D}" : nil)
+                        self?.show(items, for: text, final: true, message: items.isEmpty ? "No results for \u{201C}\(text)\u{201D}" : nil)
                     }
                 }
             } catch {
                 guard !Task.isCancelled else { return }
-                self?.show([], final: true, message: error.localizedDescription)
+                self?.show([], for: text, final: true, message: error.localizedDescription)
             }
         }
     }
 
-    private func show(_ items: [ResultItem], final: Bool, message: String?) {
+    private func show(_ items: [ResultItem], for query: String, final: Bool, message: String?) {
         results = items
+        shownQuery = query
         isFinal = final
         self.message = message
         selection = 0
