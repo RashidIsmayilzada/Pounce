@@ -20,5 +20,5 @@ Work test-first. Test `Indexer` and `Searcher` through their interfaces with rea
 ## Gotchas
 
 - The shell's default `java` is 21 (sdkman). Build with JDK 25: `export JAVA_HOME=~/.sdkman/candidates/java/25.0.5.1+2-tem` before running Maven.
-- Every model, index and benchmark corpus stays on the user's Mac; the Engine makes no network calls.
+- The embedding model is git-ignored: run `scripts/fetch-model.sh` once, or `OnnxEmbedderTest` is skipped. Every model, index and benchmark corpus stays on the user's Mac; the Engine makes no network calls.
 - Throwaway spikes live on `prototype/*` branches, never on `main`; their verdicts live in `docs/research/`.
