@@ -1,6 +1,7 @@
 package dev.pounce.infrastructure;
 
 import io.methvin.watcher.DirectoryChangeEvent;
+import io.methvin.watcher.DirectoryChangeListener;
 import io.methvin.watcher.DirectoryWatcher;
 
 import java.io.IOException;
@@ -11,6 +12,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -32,6 +34,8 @@ public final class FolderWatcher implements AutoCloseable {
     private final ScheduledExecutorService settle;
     private final Map<Path, ScheduledFuture<?>> pending = new ConcurrentHashMap<>();
     private final Consumer<Path> onChange;
+    /** Released once the watcher has subscribed to file events; changes before that would be missed. */
+    private final CountDownLatch listening = new CountDownLatch(1);
 
     private FolderWatcher(List<Path> folders, Consumer<Path> onChange) throws IOException {
         this.onChange = onChange;
@@ -39,8 +43,26 @@ public final class FolderWatcher implements AutoCloseable {
         this.watcher = DirectoryWatcher.builder()
                 .paths(folders)
                 .fileHashing(false)
-                .listener(this::onEvent)
+                .listener(new DirectoryChangeListener() {
+                    @Override
+                    public void onEvent(DirectoryChangeEvent event) {
+                        FolderWatcher.this.onEvent(event);
+                    }
+
+                    /** The event loop asks this on every turn, and only after registering the folders. */
+                    @Override
+                    public boolean isWatching() {
+                        listening.countDown();
+                        return !watcherClosed();
+                    }
+                })
                 .build();
+    }
+
+    private volatile boolean closed;
+
+    private boolean watcherClosed() {
+        return closed;
     }
 
     /** Starts watching the folders that exist; {@code onChange} receives every changed path, file or folder. */
@@ -49,9 +71,16 @@ public final class FolderWatcher implements AutoCloseable {
             var watcher = new FolderWatcher(folders.stream().filter(Files::isDirectory).toList(), onChange);
             watcher.watcher.watchAsync(Executors.newSingleThreadExecutor(
                     Thread.ofPlatform().name("watch-events").daemon().factory()));
+            // Return only once file events are flowing, so a change made right after start is never lost.
+            if (!watcher.listening.await(10, TimeUnit.SECONDS)) {
+                LOG.log(System.Logger.Level.WARNING, "File watcher took more than 10 s to start listening");
+            }
             return watcher;
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while starting the file watcher", e);
         }
     }
 
@@ -80,6 +109,7 @@ public final class FolderWatcher implements AutoCloseable {
 
     @Override
     public void close() {
+        closed = true;
         try {
             watcher.close();
         } catch (IOException e) {
