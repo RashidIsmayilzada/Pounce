@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
 
@@ -98,7 +99,14 @@ public final class Indexer {
     private void refreshFile(Path path) {
         try {
             Path file = path.toRealPath();
-            if (exclusions.excludes(file, Files.size(file))) {
+            FileStamp stamp = new FileStamp(Files.size(file), Files.getLastModifiedTime(file).toMillis());
+            if (exclusions.excludes(file, stamp.size())) {
+                return;
+            }
+            Optional<FileStamp> stored = index.stamp(file);
+            // Unchanged since it was indexed. Documents indexed before stamps existed count as unchanged too, so an
+            // upgrade does not re-read every file; their next save refreshes them through the watcher.
+            if (stored.filter(s -> s.equals(stamp) || s.equals(FileStamp.UNKNOWN)).isPresent()) {
                 return;
             }
             String text = extractor.extract(file).orElse("");
@@ -108,7 +116,7 @@ public final class Indexer {
             for (int i = 0; i < passages.size(); i++) {
                 embedded.add(new EmbeddedPassage(passages.get(i), vectors.get(i)));
             }
-            index.replace(file, embedded);
+            index.replace(file, stamp, embedded);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

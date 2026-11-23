@@ -1,6 +1,7 @@
 package dev.pounce.infrastructure;
 
 import dev.pounce.application.EmbeddedPassage;
+import dev.pounce.application.FileStamp;
 import dev.pounce.application.PassageIndex;
 import dev.pounce.domain.Query;
 import dev.pounce.domain.Result;
@@ -15,9 +16,11 @@ import org.apache.lucene.codecs.lucene104.Lucene104HnswScalarQuantizedVectorsFor
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.KnnFloatVectorField;
+import org.apache.lucene.document.StoredField;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.ReaderUtil;
@@ -48,6 +51,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -62,6 +66,8 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
     private static final String NAME = "name";
     private static final String TEXT = "text";
     private static final String VECTOR = "vector";
+    private static final String SIZE = "size";
+    private static final String MODIFIED = "modified";
     private static final int CANDIDATES = 20;
     private static final int RRF_K = 60;
 
@@ -130,7 +136,7 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
     }
 
     @Override
-    public void replace(Path document, List<EmbeddedPassage> passages) {
+    public void replace(Path document, FileStamp stamp, List<EmbeddedPassage> passages) {
         String key = document.toString();
         List<Document> block = new ArrayList<>();
         for (EmbeddedPassage p : passages) {
@@ -144,6 +150,8 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
         parent.add(new StringField(KIND, "document", Field.Store.NO));
         parent.add(new StringField(PATH, key, Field.Store.YES));
         parent.add(new TextField(NAME, fileNameWords(document), Field.Store.NO));
+        parent.add(new StoredField(SIZE, stamp.size()));
+        parent.add(new StoredField(MODIFIED, stamp.modifiedMillis()));
         block.add(parent);
         write(() -> writer.updateDocuments(new Term(PATH, key), block));
     }
@@ -151,6 +159,25 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
     @Override
     public void remove(Path document) {
         write(() -> writer.deleteDocuments(new Term(PATH, document.toString())));
+    }
+
+    @Override
+    public Optional<FileStamp> stamp(Path document) {
+        return withSearcher(searcher -> {
+            var query = new BooleanQuery.Builder()
+                    .add(new TermQuery(new Term(KIND, "document")), BooleanClause.Occur.FILTER)
+                    .add(new TermQuery(new Term(PATH, document.toString())), BooleanClause.Occur.FILTER)
+                    .build();
+            TopDocs hit = searcher.search(query, 1);
+            if (hit.scoreDocs.length == 0) {
+                return Optional.<FileStamp>empty();
+            }
+            var stored = searcher.storedFields().document(hit.scoreDocs[0].doc);
+            IndexableField size = stored.getField(SIZE);
+            IndexableField modified = stored.getField(MODIFIED);
+            return size == null || modified == null ? Optional.of(FileStamp.UNKNOWN)
+                    : Optional.of(new FileStamp(size.numericValue().longValue(), modified.numericValue().longValue()));
+        });
     }
 
     @Override

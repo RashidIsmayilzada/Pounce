@@ -13,6 +13,9 @@ final class HashingEmbedder implements Embedder {
 
     static final int DIMENSIONS = 384;
 
+    /** How many Passages have been embedded so far, so tests can see whether work was skipped. */
+    int passagesEmbedded;
+
     @Override
     public float[] embedQuery(String query) {
         return embed(query);
@@ -20,6 +23,7 @@ final class HashingEmbedder implements Embedder {
 
     @Override
     public List<float[]> embedPassages(List<String> passages) {
+        passagesEmbedded += passages.size();
         return passages.stream().map(HashingEmbedder::embed).toList();
     }
 

@@ -5,6 +5,7 @@ import dev.pounce.domain.Result;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -13,7 +14,13 @@ import java.util.Set;
  */
 public interface PassageIndex {
     /** Store the Document at this path with these Passages, replacing whatever was stored for it before. */
-    void replace(Path document, List<EmbeddedPassage> passages);
+    void replace(Path document, FileStamp stamp, List<EmbeddedPassage> passages);
+
+    /**
+     * The stamp the Document at this path was stored with. Empty if it is not in the Index; {@link FileStamp#UNKNOWN}
+     * if it was indexed before stamps existed.
+     */
+    Optional<FileStamp> stamp(Path document);
 
     void remove(Path document);
 

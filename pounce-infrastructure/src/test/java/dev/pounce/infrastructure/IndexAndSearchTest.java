@@ -29,6 +29,36 @@ class IndexAndSearchTest {
     }
 
     @Test
+    void reconciling_again_skips_files_that_have_not_changed() throws IOException {
+        var embedder = new HashingEmbedder();
+        engine = TestEngine.over(folder, embedder);
+        write("notes.md", "# Deploys\nThe canary rollout went fine.");
+        write("plan.txt", "Shift ten percent of traffic first.");
+        engine.indexer().reconcile();
+        int afterFirstScan = embedder.passagesEmbedded;
+
+        engine.indexer().reconcile();
+
+        assertThat(afterFirstScan).isPositive();
+        assertThat(embedder.passagesEmbedded).isEqualTo(afterFirstScan);
+        assertThat(engine.searcher().search(Query.of("canary"), Phase.EARLY)).hasSize(1);
+    }
+
+    @Test
+    void a_file_changed_while_pounce_was_not_running_is_indexed_again() throws IOException {
+        write("notes.md", "The canary rollout went fine.");
+        engine.indexer().reconcile();
+
+        write("notes.md", "The falcon landed safely after the long flight.");
+        Files.setLastModifiedTime(folder.resolve("notes.md"),
+                java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis() + 5_000));
+        engine.indexer().reconcile();
+
+        assertThat(engine.searcher().search(Query.of("falcon"), Phase.EARLY)).hasSize(1);
+        assertThat(engine.searcher().search(Query.of("canary"), Phase.EARLY)).isEmpty();
+    }
+
+    @Test
     void finds_a_document_by_a_word_it_contains() throws IOException {
         write("notes.md", "# Deploys\nThe canary rollout went fine.");
         write("groceries.txt", "milk, eggs, bread");
