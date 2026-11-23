@@ -19,6 +19,10 @@ The Launcher is a Swift package in `macos-app/`: `PounceKit` (Engine client, sea
 
 Work test-first. Test `Indexer` and `Searcher` through their interfaces with real temp folders, the real Lucene adapter on an in-memory directory, and `HashingEmbedder`; reserve the real ONNX model for embedder contract tests. Performance claims come from the JMH suite, never from estimates.
 
+## CI and releases
+
+`.github/workflows/ci.yml` runs all tests on each push and pull request. `.github/workflows/release.yml` publishes `Pounce.app` when a `v*` tag is pushed or the workflow is run by hand with a version; add that version's section to `CHANGELOG.md` first, since it becomes the release notes.
+
 ## Gotchas
 
 - The shell's default `java` is 21 (sdkman). Build with JDK 25: `export JAVA_HOME=~/.sdkman/candidates/java/25.0.5.1+2-tem` before running Maven.

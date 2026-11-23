@@ -1,0 +1,96 @@
+# Builds, tests, smoke-checks and publishes Pounce.app as a GitHub Release.
+# Start it either way:
+#   - push a tag:        git tag v0.2.0 && git push origin v0.2.0
+#   - or from GitHub:    Actions → Release → Run workflow → enter 0.2.0 (creates the tag on the chosen branch)
+# The release notes are that version's section of CHANGELOG.md, which must exist.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, e.g. 0.2.0 (needs a "## [0.2.0]" section in CHANGELOG.md)'
+        required: true
+
+concurrency: release
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Work out the version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then version="${INPUT_VERSION#v}"; else version="${GITHUB_REF_NAME#v}"; fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::'$version' is not a version like 1.2.3"; exit 1; }
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && git ls-remote --exit-code --tags origin "v$version" >/dev/null; then
+            echo "::error::Tag v$version already exists"; exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Release notes from CHANGELOG.md
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          awk -v v="$VERSION" '/^## \[/ { p = index($0, "## [" v "]") == 1; next } p' CHANGELOG.md > notes.md
+          [ -s notes.md ] || { echo "::error::CHANGELOG.md has no '## [$VERSION]' section"; exit 1; }
+          cat notes.md
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Cache the embedding model
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: model-bge-small-en-v1.5-int8-${{ hashFiles('scripts/fetch-model.sh') }}
+
+      - name: Fetch the embedding model
+        run: '[ -f models/bge-small-en-v1.5/model.onnx ] || scripts/fetch-model.sh'
+
+      - name: Engine and CLI tests
+        run: mvn -B -ntp verify
+
+      - name: Launcher tests
+        working-directory: macos-app
+        run: swift test
+
+      - name: Build Pounce.app
+        env:
+          POUNCE_VERSION: ${{ steps.version.outputs.version }}
+        run: JAVA_HOME_25="$JAVA_HOME" scripts/build-app.sh
+
+      - name: Smoke-check the built app
+        run: scripts/smoke-app.sh
+
+      - name: Package
+        id: package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          zip="Pounce-$VERSION-macos-arm64.zip"
+          ditto -c -k --keepParent build/Pounce.app "$zip"
+          shasum -a 256 "$zip" > "$zip.sha256"
+          echo "zip=$zip" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          ZIP: ${{ steps.package.outputs.zip }}
+        run: |
+          gh release create "v$VERSION" "$ZIP" "$ZIP.sha256" \
+            --title "Pounce $VERSION" --notes-file notes.md --target "$GITHUB_SHA"
