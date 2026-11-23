@@ -13,6 +13,8 @@ A private, on-device search bar for macOS: a Java Engine (indexing + hybrid sear
 
 The Engine is an onion of Maven modules: `pounce-domain` → `pounce-application` → `pounce-infrastructure` → `pounce-api`. Dependencies point inward only; ArchUnit tests enforce it. Spring, Lucene, ONNX Runtime and PDFBox each live only in their outer module. `pounce-cli` talks to the Engine over HTTP and depends on no Engine module.
 
+The Launcher is a Swift package in `macos-app/`: `PounceKit` (Engine client, search-as-you-type model; no UI) and the thin `PounceLauncher` app (hotkey, panel, keys). Test it with `cd macos-app && swift test`; `PounceLauncher --snapshot out.png QUERY` renders the panel against a running Engine.
+
 ## Tests
 
 Work test-first. Test `Indexer` and `Searcher` through their interfaces with real temp folders, the real Lucene adapter on an in-memory directory, and `HashingEmbedder`; reserve the real ONNX model for embedder contract tests. Performance claims come from the JMH suite, never from estimates.
