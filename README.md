@@ -1,5 +1,12 @@
 # Pounce
 
+[![CI](https://github.com/RashidIsmayilzada/Pounce/actions/workflows/ci.yml/badge.svg)](https://github.com/RashidIsmayilzada/Pounce/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/RashidIsmayilzada/Pounce)](https://github.com/RashidIsmayilzada/Pounce/releases/latest)
+[![Homebrew](https://img.shields.io/badge/brew-rashidismayilzada%2Ftap%2Fpounce-orange)](https://github.com/RashidIsmayilzada/homebrew-tap)
+[![macOS 14+ · Apple Silicon](https://img.shields.io/badge/macOS-14%2B%20%C2%B7%20Apple%20Silicon-lightgrey)](#install)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Good first issues](https://img.shields.io/github/issues/RashidIsmayilzada/Pounce/good%20first%20issue?label=good%20first%20issues&color=7057ff)](https://github.com/RashidIsmayilzada/Pounce/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+
 **Private, on-device semantic search for macOS.** Press a shortcut, start typing, and find your files by what they *say*, not only by their name. Everything runs on your Mac: no cloud, no API calls.
 
 ![Pounce finding an annual statement by meaning, then a recipe](docs/media/pounce-demo.gif)
