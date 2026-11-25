@@ -43,6 +43,9 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
     /// <summary>A search must run this long before the progress indicator appears, so quick searches never flicker it.</summary>
     private static readonly TimeSpan SpinnerDelay = TimeSpan.FromMilliseconds(150);
 
+    /// <summary>The installed applications are listed again on a show at most this often.</summary>
+    private static readonly TimeSpan AppsReloadInterval = TimeSpan.FromSeconds(30);
+
     /// <summary>Where the window waits during the warm-up show: outside any real monitor layout.</summary>
     private const int OffScreen = -20000;
 
@@ -51,6 +54,7 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
     private readonly string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     private readonly ObservableCollection<RowModel> rows = [];
     private readonly RepeatGuard toggleGuard = new(TimeSpan.FromMilliseconds(350));
+    private readonly RepeatGuard appsReloadGuard = new(AppsReloadInterval);
     private readonly DispatcherTimer spinnerDelay;
     private readonly LightTheme lightTheme = new();
     private readonly DarkTheme darkTheme = new();
@@ -207,12 +211,14 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
     }
 
     /// <summary>
-    /// Re-reads the installed applications in the background, at most one listing at a time. A failure is logged
-    /// and the previous list stays.
+    /// Re-reads the installed applications in the background: at most one listing at a time, and at most one every
+    /// <see cref="AppsReloadInterval"/> (the first call always lists). The listing runs on the shell thread ahead of
+    /// icon loads, so listing on every show would delay the icons of the first results. A failure is logged and the
+    /// previous list stays.
     /// </summary>
     public void ReloadApps()
     {
-        if (reloadingApps)
+        if (reloadingApps || !appsReloadGuard.Accept(TimeSpan.FromMilliseconds(Environment.TickCount64)))
         {
             return;
         }

@@ -141,6 +141,18 @@ public class RepeatGuardTests
         Assert.True(guard.Accept(Ms(5000)));
         Assert.True(guard.Accept(Ms(100)));
     }
+
+    [Fact]
+    public void As_a_throttle_the_first_event_always_passes_then_one_per_interval()
+    {
+        // The apps listing on show: at most once every 30 s, the first one even right after the machine started.
+        var guard = new RepeatGuard(TimeSpan.FromSeconds(30));
+
+        Assert.True(guard.Accept(Ms(0)));
+        Assert.False(guard.Accept(Ms(29_999)));
+        Assert.True(guard.Accept(Ms(30_000)));
+        Assert.False(guard.Accept(Ms(45_000)));
+    }
 }
 
 public class PanelFocusPolicyTests

@@ -67,7 +67,7 @@ public partial class App : Application
 
         instance.ShowRequested += (_, _) => Dispatcher.BeginInvoke(new Action(panel.ShowPanel));
         instance.QuitRequested += (_, _) => Dispatcher.BeginInvoke(new Action(Shutdown));
-        // The panel reloads the apps each time it is shown; this first listing is ready before the first show.
+        // The first listing, ready before the first show; shows list again at most every 30 seconds.
         panel.ReloadApps();
     }
 
