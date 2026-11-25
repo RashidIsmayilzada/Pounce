@@ -1,4 +1,5 @@
-# Smoke-checks build\Pounce-windows-x64\Pounce\Pounce.exe on a temporary home and Watched Folder (never your real folders):
+# Smoke-checks build\Pounce-windows-x64\Pounce\Pounce.exe on a temporary home, whose name has letters outside the ANSI
+# code page, and a temporary Watched Folder (never your real folders):
 #   1. Pounce.exe starts its bundled Engine, which indexes the folder and answers a search through the API, with
 #      ONNX Runtime's DLLs loaded from the bundle's native\onnxruntime rather than unpacked into the temp folder;
 #   2. closing Pounce (Pounce.exe --quit, which exits with 0) also stops the Engine;
@@ -155,7 +156,12 @@ function Show-LogTail([string]$Path) {
 $base = $env:RUNNER_TEMP
 if (-not $base) { $base = [System.IO.Path]::GetTempPath() }
 $Tmp = Join-Path $base ('pounce-smoke-' + [System.Guid]::NewGuid().ToString('N').Substring(0, 8))
-$HomeDir = Join-Path $Tmp 'home'
+# A home named like a user the ANSI code page can't spell (Cyrillic, and the Azerbaijani schwa), as the Engine's
+# home must work for any user name:
+# java.exe would get it as "?" on its command line, so the Launcher passes it in the environment. Written as character
+# codes because Windows PowerShell 5.1 reads a script without a byte order mark as ANSI.
+$unicodeName = (-join [char[]](0x0420, 0x0430, 0x0448, 0x0438, 0x0434)) + ' ' + [char]0x018F + 'li'
+$HomeDir = Join-Path $Tmp ('home ' + $unicodeName)
 $Watched = Join-Path $Tmp 'watched'
 $savedPounceHome = $env:POUNCE_HOME
 $savedNoDialogs = $env:POUNCE_NO_DIALOGS
