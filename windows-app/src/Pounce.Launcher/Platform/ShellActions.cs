@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
-using System.Windows;
 using Microsoft.Win32;
 using Pounce.Core;
 
@@ -10,7 +9,8 @@ namespace Pounce.Launcher.Platform;
 /// <summary>
 /// Opens and reveals through the Windows shell. Every action runs on its own short-lived STA thread (the shell wants
 /// COM in a single-threaded apartment, and a slow network drive or file handler can block for seconds), so the UI
-/// thread never waits. Problems are logged and shown in a message box; nothing is thrown to the caller.
+/// thread never waits. Problems are shown in a message box (only logged in an unattended run); nothing is thrown to
+/// the caller.
 /// </summary>
 public sealed class ShellActions : IShellActions
 {
@@ -236,17 +236,37 @@ public sealed class ShellActions : IShellActions
         thread.Start();
     }
 
-    /// <summary>Tells the user, in a message box on the calling (shell) thread, so the UI thread is never blocked.</summary>
+    /// <summary>
+    /// Tells the user, in a message box on the calling (shell) thread, so the UI thread is never blocked. By then the
+    /// panel has hidden and another program may have the foreground, so the box has no owner, asks for the foreground
+    /// and is topmost: it never opens unseen behind that program. In an unattended run (<see cref="DialogsAllowed"/>
+    /// false) the problem is only logged.
+    /// </summary>
     private static void Problem(string message)
     {
+        if (!DialogsAllowed())
+        {
+            Log.Warn("Not shown (no dialogs): " + message);
+            return;
+        }
         try
         {
-            MessageBox.Show(message, "Pounce", MessageBoxButton.OK, MessageBoxImage.Warning, MessageBoxResult.OK,
-                MessageBoxOptions.None);
+            if (Win32.MessageBox(IntPtr.Zero, message, "Pounce",
+                Win32.MB_ICONWARNING | Win32.MB_SETFOREGROUND | Win32.MB_TOPMOST) == 0)
+            {
+                Log.Warn($"Could not show a message ({Win32.LastError()}): {message}");
+            }
         }
         catch (Exception e)
         {
-            Log.Warn("Could not show a message", e);
+            Log.Warn("Could not show a message: " + message, e);
         }
     }
+
+    /// <summary>
+    /// False in an unattended run, where nobody would close a dialog: when the process is not interactive
+    /// (<see cref="Environment.UserInteractive"/>) or the environment variable <c>POUNCE_NO_DIALOGS</c> is set.
+    /// </summary>
+    private static bool DialogsAllowed() =>
+        Environment.UserInteractive && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("POUNCE_NO_DIALOGS"));
 }

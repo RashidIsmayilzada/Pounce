@@ -26,6 +26,17 @@ internal static partial class Win32
     /// a slow network share; the caller checks, with a time limit).</summary>
     public const uint KF_FLAG_DONT_VERIFY = 0x00004000;
 
+    /// <summary><c>MB_ICONWARNING</c> (WinUser.h: <c>MB_ICONEXCLAMATION</c>, 0x00000030L): the warning icon. With
+    /// none of the MB_OK… button flags (all 0 is <c>MB_OK</c>), one OK button.</summary>
+    public const uint MB_ICONWARNING = 0x00000030;
+
+    /// <summary><c>MB_SETFOREGROUND</c> (WinUser.h, 0x00010000L): the box asks to become the foreground window.</summary>
+    public const uint MB_SETFOREGROUND = 0x00010000;
+
+    /// <summary><c>MB_TOPMOST</c> (WinUser.h, 0x00040000L): the box is topmost, so it shows even when the foreground
+    /// lock keeps it from the foreground.</summary>
+    public const uint MB_TOPMOST = 0x00040000;
+
     /// <summary><c>FOLDERID_Downloads</c>, from KnownFolders.h.</summary>
     public static readonly Guid FOLDERID_Downloads = new("374DE290-123F-4565-9164-39C4925E467B");
 
@@ -43,6 +54,13 @@ internal static partial class Win32
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool AllowSetForegroundWindow(uint dwProcessId);
+
+    /// <summary>
+    /// <c>int MessageBoxW(HWND hWnd, LPCWSTR lpText, LPCWSTR lpCaption, UINT uType)</c>. Modal on the calling thread;
+    /// returns the button pressed, 0 on failure.
+    /// </summary>
+    [LibraryImport("user32.dll", EntryPoint = "MessageBoxW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    public static partial int MessageBox(IntPtr hWnd, string lpText, string lpCaption, uint uType);
 
     /// <summary>
     /// <c>HRESULT SHGetKnownFolderPath(REFKNOWNFOLDERID rfid, DWORD dwFlags, HANDLE hToken, PWSTR *ppszPath)</c>.
