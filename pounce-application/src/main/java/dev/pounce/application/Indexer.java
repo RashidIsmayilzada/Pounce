@@ -150,9 +150,9 @@ public final class Indexer {
     }
 
     /**
-     * Visits every regular file below {@code start} (a link to a file counts; links to folders are not followed),
-     * without entering excluded folders. A file or folder that cannot be read is logged, reported to
-     * {@code onUnreadable} and skipped.
+     * Visits every file below {@code start} that can hold a Document ({@link #isDocumentFile}; a link to one counts,
+     * links to folders are not followed), without entering excluded folders. A file or folder that cannot be read
+     * is logged, reported to {@code onUnreadable} and skipped.
      */
     private void walk(Path watchedFolder, Path start, Consumer<Path> onFile, Consumer<Path> onUnreadable) {
         try {
@@ -165,7 +165,7 @@ public final class Indexer {
 
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                    if (attrs.isRegularFile() || attrs.isSymbolicLink() && Files.isRegularFile(file)) {
+                    if (attrs.isSymbolicLink() ? linksToDocumentFile(file) : isDocumentFile(attrs)) {
                         onFile.accept(file);
                     }
                     return FileVisitResult.CONTINUE;
@@ -212,7 +212,15 @@ public final class Indexer {
                 LOG.log(System.Logger.Level.INFO, "Skipped {0}: its name cannot be used to open it again", file);
                 return;
             }
-            FileStamp stamp = new FileStamp(Files.size(file), Files.getLastModifiedTime(file).toMillis());
+            BasicFileAttributes attributes = Files.readAttributes(file, BasicFileAttributes.class);
+            if (!isDocumentFile(attributes)) {
+                LOG.log(System.Logger.Level.DEBUG, "Skipped {0}: not a file with content to read", file);
+                if (index.stamp(file).isPresent()) {
+                    index.remove(file);
+                }
+                return;
+            }
+            FileStamp stamp = new FileStamp(attributes.size(), attributes.lastModifiedTime().toMillis());
             if (exclusions.excludes(watchedFolder, file, stamp.size())) {
                 if (index.stamp(file).isPresent()) {
                     index.remove(file);
@@ -268,6 +276,27 @@ public final class Indexer {
             }
         }
         return best != null ? best : real.getRoot();
+    }
+
+    /**
+     * Whether a file with these attributes has content to read as a Document: a regular file, or on Windows a file
+     * that is a reparse point other than a link, which Java reports as "other" rather than regular. Every OneDrive
+     * file is one, even once downloaded (those only in the cloud are then left out by {@link #isCloudOnlyOrSystem}).
+     * On macOS and Linux "other" is a device, a socket or a named pipe, which must never be read: opening a named
+     * pipe waits for a writer, forever.
+     */
+    private static boolean isDocumentFile(BasicFileAttributes attributes) {
+        return attributes.isRegularFile()
+                || HAS_WINDOWS_ATTRIBUTES && attributes.isOther() && !attributes.isDirectory();
+    }
+
+    /** Whether this link leads to a file that can hold a Document; a broken link does not. */
+    private static boolean linksToDocumentFile(Path link) {
+        try {
+            return isDocumentFile(Files.readAttributes(link, BasicFileAttributes.class));
+        } catch (IOException broken) {
+            return false;
+        }
     }
 
     /**

@@ -12,9 +12,11 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /** The Indexer + Searcher seam: real files, real Lucene (in memory), fake embedder. */
@@ -318,6 +320,33 @@ class IndexAndSearchTest {
         assertThat(engine.searcher().search(Query.of("canary"), Phase.FINAL))
                 .extracting(Result::path)
                 .containsExactly(folder.resolve("notes.md"));
+    }
+
+    /** Opening a named pipe waits for a writer, forever: it must never be read, however it is reached. */
+    @Test
+    void a_named_pipe_in_a_watched_folder_is_never_read_or_indexed() throws IOException, InterruptedException {
+        write("notes.md", "The canary rollout went fine.");
+        Path pipe = folder.resolve("canary-pipe.txt");
+        makeNamedPipe(pipe);
+        Files.createSymbolicLink(folder.resolve("canary-link.txt"), pipe);
+
+        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
+            engine.indexer().reconcile();
+            engine.indexer().refresh(pipe);
+            engine.indexer().refresh(folder.resolve("canary-link.txt"));
+        });
+
+        assertThat(fileNamesFound("canary")).containsExactly("notes.md");
+    }
+
+    private static void makeNamedPipe(Path path) throws InterruptedException {
+        int exit;
+        try {
+            exit = new ProcessBuilder("mkfifo", path.toString()).inheritIO().start().waitFor();
+        } catch (IOException noMkfifo) {
+            exit = -1;
+        }
+        assumeTrue(exit == 0, "cannot make a named pipe here (no mkfifo)");
     }
 
     @Test
