@@ -13,7 +13,7 @@ Before you start: run `Pounce.exe` with an Engine running (the bundled one, or `
 | Type straight away, without clicking. | The letters go into the search field. The caret was already there. |
 | Check the taskbar and Alt+Tab while the panel is open. | No Pounce button in the taskbar, no Pounce entry in Alt+Tab. |
 | Press Alt+Space within two seconds of starting Pounce. | Still appears and takes the keys (it may take a little longer the very first time). It never shows the warm-up's sample rows ("Pounce" with "Open", "Pounce warm-up.txt"), not even for a frame. |
-| Start Pounce, wait two seconds, open the panel and type one letter. | The first results come as fast as they do later on: no pause on the first letter while row templates or icons are set up (Pounce builds a sample row of each kind off-screen at startup). |
+| Start Pounce, wait two seconds, open the panel and type one letter. | The first results come as fast as they do later on: no pause on the first letter while row templates or icons are set up (Pounce builds a sample row of each kind off-screen at startup). With the bundled Engine, wait for "Engine ready" in the log first (section 12). |
 
 ## 2. Typing and results
 
@@ -130,6 +130,20 @@ On Windows 10, or Windows 11 21H2 (build 22000), over Remote Desktop, or with so
 | Start Pounce with both `POUNCE_TEST_FAIL_STARTUP=1` and `POUNCE_NO_DIALOGS=1`. | No message box; the process exits with code 1 at once; the log has the failure and a "No dialog" line with what the box would have said. |
 | With Pounce running, run `Pounce.exe --quit`. | No message box ever, whatever happens; Pounce quits; the log has "--quit:" lines from the second process. |
 | With Pounce running, start `Pounce.exe` again. | The panel shows (section 5); the log has "Pounce is already running; asking it to show its panel". |
+
+## 12. The first half-minute
+
+The bundled Engine needs about half a minute after Pounce starts it before it answers (it loads its model and opens its index first). The log says `Engine launched; waiting until it answers`, then `Engine ready after 27.4 s` (or whatever it took). Note that number in your report. Quit any running Pounce first, so that Pounce starts its own Engine.
+
+| Do | Right |
+|---|---|
+| Start Pounce, press Alt+Space about 5 seconds later and type the start of an app's name, letter by letter. | Every letter updates the matching apps at once; the letters never stall. Below the apps, in grey: "Pounce is starting. Your results will appear in a moment.", and the spinner turns at the right of the search bar. Never "Pounce isn't running at …" and never "Can't read … bootstrap-secret". |
+| Leave the panel open with the text in it until the Engine is ready. | As soon as `Engine ready` appears in the log (the Engine is asked every one to two seconds), the files for the text in the box appear by themselves, without typing again; the message and the spinner go. |
+| Do the same as a first run: quit Pounce, then in a Command Prompt `set POUNCE_HOME=%TEMP%\pounce-first-run` and start `Pounce.exe` from there (a new, empty home, so the Engine has not written its `bootstrap-secret` yet). | The same as above; it takes longer only if the Engine does. Afterwards quit Pounce and delete that folder. |
+| While it is starting, type, then delete everything. | The message goes with the text. |
+| While it is starting, type, press Esc, and open the panel again after `Engine ready`. | An empty search field; searching works as usual. |
+| Start Pounce with the Engine unable to start (rename the `runtime` folder next to `Pounce.exe`), open the panel and type. | No "starting" message: matching apps and, after a moment, "Pounce isn't running at http://127.0.0.1:7431. Start Pounce and try again." The tray menu names the problem. Rename the folder back afterwards. |
+| Open the tray menu while it is starting. | It already says "Search engine running" (known: the menu does not tell starting from running yet). |
 
 ## When something is wrong
 

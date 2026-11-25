@@ -53,9 +53,15 @@ public sealed record FileItem(ResultItem Result) : SearchItem
 /// bind <c>ItemsSource</c> to <see cref="Items"/> (or to <see cref="Apps"/> and <see cref="Results"/>) and
 /// <c>SelectedIndex</c> to <see cref="Selection"/>. A change to <see cref="Items"/> is announced before the
 /// <see cref="Selection"/> that goes with it.</para>
+/// <para>Starting: while <see cref="EngineStarting"/> is true the Engine is not answering yet, so a Query is not sent
+/// at all (each would only wait for a refused connection). It is held, with <see cref="StartingMessage"/> and the
+/// matching apps shown and <see cref="IsSearching"/> true, and searched once <see cref="EngineStarting"/> turns false.</para>
 /// </remarks>
 public sealed class SearchModel : INotifyPropertyChanged
 {
+    /// <summary>The <see cref="Message"/> while the Engine is starting and a Query waits for it.</summary>
+    public const string StartingMessage = "Pounce is starting. Your results will appear in a moment.";
+
     private readonly ISearchEngine _engine;
     private readonly IAppSource _appSource;
     private readonly int _limit;
@@ -70,6 +76,8 @@ public sealed class SearchModel : INotifyPropertyChanged
     private int _selection;
     private CancellationTokenSource? _search;
     private int _generation;
+    private bool _engineStarting;
+    private bool _waitingForEngine;
 
     /// <summary>A model that searches <paramref name="engine"/> and, optionally, the apps from <paramref name="apps"/>.</summary>
     /// <param name="engine">Answers the Queries.</param>
@@ -101,6 +109,31 @@ public sealed class SearchModel : INotifyPropertyChanged
             Raise(nameof(Query));
             Raise(nameof(IsSearching));
             Start();
+        }
+    }
+
+    /// <summary>
+    /// True while the Engine has been started but does not answer yet. Then a new Query is held instead of sent, and a
+    /// search that fails because the Engine isn't there yet (<see cref="EngineProblem.NotRunning"/>, or
+    /// <see cref="EngineProblem.SecretMissing"/> before the Engine has written its secret) is held too; either way
+    /// <see cref="Message"/> is <see cref="StartingMessage"/>. Setting it to false searches a held Query, once.
+    /// </summary>
+    public bool EngineStarting
+    {
+        get => _engineStarting;
+        set
+        {
+            if (value == _engineStarting)
+            {
+                return;
+            }
+            _engineStarting = value;
+            Raise(nameof(EngineStarting));
+            if (!value && _waitingForEngine)
+            {
+                // As if the Query had just been typed. Nothing runs to cancel: a held Query has no search.
+                Start();
+            }
         }
     }
 
@@ -177,6 +210,7 @@ public sealed class SearchModel : INotifyPropertyChanged
     {
         _search?.Cancel();
         _search = null;
+        _waitingForEngine = false;
         int generation = ++_generation;
         SetApps(AppMatcher.Rank(_query, _catalog));
         Selection = 0;
@@ -184,6 +218,11 @@ public sealed class SearchModel : INotifyPropertyChanged
         if (text.Length == 0)
         {
             Show([], "", final: true, message: null);
+            return;
+        }
+        if (_engineStarting)
+        {
+            WaitForEngine(text);
             return;
         }
         SetIsFinal(false);
@@ -214,7 +253,15 @@ public sealed class SearchModel : INotifyPropertyChanged
         {
             if (generation == _generation)
             {
-                Show([], text, final: true, e.Message);
+                // While the Engine starts, "isn't running" and "can't read the secret" only mean "not yet".
+                if (_engineStarting && e is EngineException { Problem: EngineProblem.NotRunning or EngineProblem.SecretMissing })
+                {
+                    WaitForEngine(text);
+                }
+                else
+                {
+                    Show([], text, final: true, e.Message);
+                }
             }
         }
         finally
@@ -225,6 +272,13 @@ public sealed class SearchModel : INotifyPropertyChanged
             }
             search.Dispose();
         }
+    }
+
+    /// <summary>Holds <paramref name="text"/> until the Engine answers: no Results, the starting message, still searching.</summary>
+    private void WaitForEngine(string text)
+    {
+        _waitingForEngine = true;
+        Show([], text, final: false, StartingMessage);
     }
 
     private void Show(IReadOnlyList<ResultItem> items, string query, bool final, string? message)

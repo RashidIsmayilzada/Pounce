@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Threading;
@@ -28,6 +29,7 @@ public partial class App : Application
 
     private SingleInstance? instance;
     private EngineSupervisor? supervisor;
+    private EngineReadiness? readiness;
     private HttpEngineClient? engine;
     private GlobalHotKey? hotKey;
     private TrayIcon? tray;
@@ -77,11 +79,11 @@ public partial class App : Application
 
         var configuration = Configuration.FromEnvironment();
         FirstRun.EnsureSettings(configuration.Home);
-        StartBundledEngine(configuration);
 
         var shell = new ShellActions();
         engine = configuration.CreateEngineClient();
         var model = new SearchModel(engine, new WindowsAppSource());
+        StartBundledEngine(configuration, model);
         LauncherWindow window = panel = new LauncherWindow(model, shell, new ShellIconProvider());
 
         hotKey = new GlobalHotKey(configuration.HotKey);
@@ -151,6 +153,9 @@ public partial class App : Application
         Quietly("Removing the tray icon", () => oldTray?.Dispose());
         GlobalHotKey? oldHotKey = Interlocked.Exchange(ref hotKey, null);
         Quietly("Releasing the hotkey", () => oldHotKey?.Dispose());
+        // Before the Engine is stopped, so that stopping it does not end the wait and search a held Query again.
+        EngineReadiness? oldReadiness = Interlocked.Exchange(ref readiness, null);
+        Quietly("Ending the wait for the Engine", () => oldReadiness?.Abandon());
         EngineSupervisor? oldSupervisor = Interlocked.Exchange(ref supervisor, null);
         Quietly("Stopping the Engine", () => oldSupervisor?.Stop());
         HttpEngineClient? oldEngine = Interlocked.Exchange(ref engine, null);
@@ -211,17 +216,77 @@ public partial class App : Application
         Log.Start(Path.Combine(folder, "launcher.log"));
     }
 
-    /// <summary>Next to a bundled Engine the Launcher owns it; run from a build folder, the Engine is started by hand.</summary>
-    private void StartBundledEngine(Configuration configuration)
+    /// <summary>
+    /// Next to a bundled Engine the Launcher owns it; run from a build folder, the Engine is started by hand (and
+    /// <see cref="SearchModel.EngineStarting"/> stays false). The bundled Engine takes about half a minute to answer
+    /// after it is launched; until it does, <paramref name="model"/> holds searches and says Pounce is starting.
+    /// </summary>
+    private void StartBundledEngine(Configuration configuration, SearchModel model)
     {
         var layout = EngineLayout.Bundled(AppContext.BaseDirectory, configuration.Home.Folder);
         if (!File.Exists(layout.Jar))
         {
             return;
         }
-        supervisor = new EngineSupervisor(layout, new EngineProcessStarter(configuration.Home.EngineLog),
-            configuration.CreateEngineProbe());
-        Observe(supervisor.StartAsync(), "Starting the Engine");
+        HttpEngineProbe probe = configuration.CreateEngineProbe();
+        EngineSupervisor engineSupervisor = supervisor = new EngineSupervisor(layout,
+            new EngineProcessStarter(configuration.Home.EngineLog), probe);
+        EngineReadiness waiting = readiness = new EngineReadiness(probe);
+        waiting.Changed += (_, _) => OnReadinessChanged(waiting, model);
+        engineSupervisor.StateChanged += (_, _) => OnEngineStateChanged(engineSupervisor, waiting);
+        // The supervisor first spends up to a second finding out whether an Engine already runs; a search typed then
+        // waits too, rather than saying Pounce isn't running.
+        waiting.Expect();
+        Observe(StartEngineAsync(engineSupervisor, waiting), "Starting the Engine");
+    }
+
+    private static async Task StartEngineAsync(EngineSupervisor engineSupervisor, EngineReadiness waiting)
+    {
+        try
+        {
+            await engineSupervisor.StartAsync();
+        }
+        finally
+        {
+            // A start that threw, or was stopped while it probed, raises no StateChanged: never stay "starting".
+            waiting.Follow(engineSupervisor.State);
+        }
+    }
+
+    private static void OnEngineStateChanged(EngineSupervisor engineSupervisor, EngineReadiness waiting)
+    {
+        EngineState state = engineSupervisor.State;
+        if (state.Status == EngineStatus.Running)
+        {
+            Log.Info("Engine launched; waiting until it answers");
+        }
+        else if (state.Status == EngineStatus.Reusing)
+        {
+            Log.Info("An Engine already answers; using it");
+        }
+        waiting.Follow(state);
+    }
+
+    private void OnReadinessChanged(EngineReadiness waiting, SearchModel model)
+    {
+        if (!ReferenceEquals(readiness, waiting))
+        {
+            return; // Closing: see CleanUp.
+        }
+        model.EngineStarting = waiting.IsStarting;
+        if (waiting.IsStarting)
+        {
+            return;
+        }
+        if (waiting.ReadyAfter is { } after)
+        {
+            Log.Info(string.Create(CultureInfo.InvariantCulture, $"Engine ready after {after.TotalSeconds:0.0} s"));
+        }
+        else if (waiting.GaveUpAfter is { } waited)
+        {
+            Log.Warn(string.Create(CultureInfo.InvariantCulture,
+                $"The Engine still did not answer {waited.TotalSeconds:0} s after it was launched; searches now show the problem"));
+        }
     }
 
     /// <summary>Logs the failure of a task nobody awaits. Async void on purpose: it catches everything itself.</summary>

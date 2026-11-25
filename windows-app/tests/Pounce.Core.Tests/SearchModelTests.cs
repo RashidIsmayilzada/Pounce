@@ -220,6 +220,225 @@ public class SearchModelTests
         Assert.Equal(0, model.Selection);
     });
 
+    // ---- While the Engine starts ----
+
+    [Fact]
+    public void While_the_engine_starts_a_query_is_held_with_the_matching_apps_and_a_starting_message() => SingleThreadContext.Run(async _ =>
+    {
+        var engine = new QueuedEngine();
+        var apps = new FixedApps("Calculator", "Calendar", "Notepad");
+        var model = new SearchModel(engine, apps) { EngineStarting = true };
+        await model.ReloadAppsAsync();
+
+        model.Query = "ca";
+        model.Query = "cal";
+
+        Assert.Equal(0, engine.Calls);
+        Assert.Equal(SearchModel.StartingMessage, model.Message);
+        Assert.Equal("Pounce is starting. Your results will appear in a moment.", model.Message);
+        Assert.Equal(["Calculator", "Calendar"], model.Apps.Select(a => a.Name).Order(StringComparer.Ordinal));
+        Assert.Equal(2, model.Items.Count);
+        Assert.Empty(model.Results);
+        Assert.True(model.IsSearching);
+        Assert.False(model.IsFinal);
+        Assert.Equal("cal", model.ShownQuery);
+    });
+
+    [Fact]
+    public void Once_the_engine_answers_the_held_query_is_searched_once() => SingleThreadContext.Run(async _ =>
+    {
+        var engine = new QueuedEngine();
+        var model = new SearchModel(engine) { EngineStarting = true };
+        model.Query = "can";
+        model.Query = "canary";
+
+        model.EngineStarting = false;
+        model.EngineStarting = true;
+        model.EngineStarting = false;
+
+        QueuedEngine.Call call = await engine.NextCall();
+        Assert.Equal("canary", call.Query);
+        Assert.Equal(1, engine.Calls);
+        Assert.True(model.IsSearching);
+        call.Send(SearchPhase.Final([Item("rollout.md")]));
+        await model.Until(m => m.IsFinal);
+        Assert.Equal(["rollout.md"], model.Results.Select(r => r.Name));
+        Assert.Null(model.Message);
+        Assert.Equal(1, engine.Calls);
+    });
+
+    [Fact]
+    public void A_query_typed_after_the_engine_answers_is_not_cancelled_by_the_held_one() => SingleThreadContext.Run(async _ =>
+    {
+        var engine = new QueuedEngine();
+        var model = new SearchModel(engine) { EngineStarting = true };
+        model.Query = "can";
+        model.EngineStarting = false;
+        QueuedEngine.Call held = await engine.NextCall();
+
+        model.Query = "canary";
+        QueuedEngine.Call typed = await engine.NextCall();
+        model.EngineStarting = true;
+        model.EngineStarting = false;
+
+        Assert.True(held.Cancelled);
+        Assert.False(typed.Cancelled);
+        Assert.Equal(2, engine.Calls);
+        typed.Send(SearchPhase.Final([Item("rollout.md")]));
+        await model.Until(m => m.IsFinal);
+        Assert.Equal("canary", model.ShownQuery);
+    });
+
+    [Fact]
+    public void A_box_cleared_while_waiting_searches_nothing_when_the_engine_answers() => SingleThreadContext.Run(_ =>
+    {
+        var engine = new QueuedEngine();
+        var model = new SearchModel(engine) { EngineStarting = true };
+        model.Query = "canary";
+        model.Query = "";
+
+        model.EngineStarting = false;
+
+        Assert.Equal(0, engine.Calls);
+        Assert.Null(model.Message);
+        Assert.False(model.IsSearching);
+        return Task.CompletedTask;
+    });
+
+    [Theory]
+    [InlineData(EngineProblem.NotRunning)]
+    [InlineData(EngineProblem.SecretMissing)]
+    public void A_search_that_finds_no_engine_yet_waits_for_it_while_it_starts(EngineProblem problem) => SingleThreadContext.Run(async _ =>
+    {
+        var engine = new QueuedEngine();
+        var model = new SearchModel(engine);
+        model.Query = "canary";
+        QueuedEngine.Call first = await engine.NextCall();
+
+        model.EngineStarting = true;
+        first.Fail(Problem(problem));
+        await model.Until(m => m.Message is not null);
+
+        Assert.Equal(SearchModel.StartingMessage, model.Message);
+        Assert.True(model.IsSearching);
+        model.EngineStarting = false;
+        QueuedEngine.Call again = await engine.NextCall();
+        Assert.Equal("canary", again.Query);
+        again.Send(SearchPhase.Final([Item("rollout.md")]));
+        await model.Until(m => m.IsFinal);
+        Assert.Null(model.Message);
+    });
+
+    [Theory]
+    [InlineData(EngineProblem.SecretRefused, "Pounce refused the secret in C:\\Pounce\\bootstrap-secret. Is it from another Pounce install?")]
+    [InlineData(EngineProblem.Unexpected, "Pounce answered with HTTP 500.")]
+    public void Other_problems_keep_their_own_text_while_the_engine_starts(EngineProblem problem, string text) => SingleThreadContext.Run(async _ =>
+    {
+        var engine = new QueuedEngine();
+        var model = new SearchModel(engine);
+        model.Query = "canary";
+        QueuedEngine.Call call = await engine.NextCall();
+
+        model.EngineStarting = true;
+        call.Fail(Problem(problem));
+        await model.Until(m => m.Message is not null);
+
+        Assert.Equal(text, model.Message);
+        Assert.True(model.IsFinal);
+        Assert.False(model.IsSearching);
+        model.EngineStarting = false;
+        Assert.Equal(1, engine.Calls);
+    });
+
+    [Fact]
+    public void A_search_that_succeeds_while_the_engine_starts_is_shown_as_usual() => SingleThreadContext.Run(async _ =>
+    {
+        var engine = new QueuedEngine();
+        var model = new SearchModel(engine);
+        model.Query = "canary";
+        QueuedEngine.Call call = await engine.NextCall();
+
+        model.EngineStarting = true;
+        call.Send(SearchPhase.Final([Item("rollout.md")]));
+        await model.Until(m => m.IsFinal);
+
+        Assert.Equal(["rollout.md"], model.Results.Select(r => r.Name));
+        Assert.Null(model.Message);
+        model.EngineStarting = false;
+        Assert.Equal(1, engine.Calls);
+    });
+
+    [Fact]
+    public void When_the_engine_is_not_starting_its_absence_is_reported() => SingleThreadContext.Run(async _ =>
+    {
+        var engine = new QueuedEngine();
+        var model = new SearchModel(engine) { EngineStarting = true };
+        model.Query = "canary";
+
+        // The wait was abandoned (the Engine failed): the held Query is searched and the real problem shows.
+        model.EngineStarting = false;
+        (await engine.NextCall()).Fail(Problem(EngineProblem.NotRunning));
+        await model.Until(m => m.IsFinal);
+
+        Assert.Equal("Pounce isn't running at http://127.0.0.1:7431. Start Pounce and try again.", model.Message);
+        Assert.False(model.IsSearching);
+    });
+
+    private static EngineException Problem(EngineProblem problem) => problem switch
+    {
+        EngineProblem.NotRunning => EngineException.NotRunning(new Uri("http://127.0.0.1:7431")),
+        EngineProblem.SecretMissing => EngineException.SecretMissing(@"C:\Pounce\bootstrap-secret"),
+        EngineProblem.SecretRefused => EngineException.SecretRefused(@"C:\Pounce\bootstrap-secret"),
+        _ => EngineException.Unexpected(500),
+    };
+
+    /// <summary>
+    /// Every search is a new call the test answers by hand. A call is counted the moment the model asks, before
+    /// anything is awaited, so "no call" can be checked right after setting the Query.
+    /// </summary>
+    private sealed class QueuedEngine : ISearchEngine
+    {
+        private readonly System.Threading.Channels.Channel<Call> _calls = System.Threading.Channels.Channel.CreateUnbounded<Call>();
+        private int _count;
+
+        public int Calls => Volatile.Read(ref _count);
+
+        public async IAsyncEnumerable<SearchPhase> SearchAsync(string query, int limit,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _count);
+            var call = new Call(query, cancellationToken);
+            _calls.Writer.TryWrite(call);
+            await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+            await foreach (SearchPhase phase in call.Phases.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
+                yield return phase;
+            }
+        }
+
+        public async Task<Call> NextCall() => await _calls.Reader.ReadAsync().AsTask().WaitAsync(Patience);
+
+        public sealed class Call(string query, CancellationToken cancelled)
+        {
+            public string Query => query;
+
+            public bool Cancelled => cancelled.IsCancellationRequested;
+
+            public System.Threading.Channels.Channel<SearchPhase> Phases { get; } = System.Threading.Channels.Channel.CreateUnbounded<SearchPhase>();
+
+            public void Send(SearchPhase phase)
+            {
+                Phases.Writer.TryWrite(phase);
+                if (phase.IsFinal)
+                {
+                    Phases.Writer.TryComplete();
+                }
+            }
+
+            public void Fail(Exception error) => Phases.Writer.TryComplete(error);
+        }
+    }
+
     /// <summary>Records the one search it gets, and never answers.</summary>
     private sealed class RecordingEngine : ISearchEngine
     {
