@@ -295,10 +295,12 @@ public class PounceHomeTests
     private static Func<string, string?> Variables(params (string Name, string Value)[] variables) =>
         name => variables.Where(v => v.Name == name).Select(v => v.Value).FirstOrDefault();
 
+    private static string NotAsked() => throw new InvalidOperationException("not asked");
+
     [Fact]
     public void Defaults_to_pounce_in_local_app_data()
     {
-        PounceHome home = PounceHome.Resolve(Variables(), () => @"C:\Users\me\AppData\Local");
+        PounceHome home = PounceHome.Resolve(Variables(("LOCALAPPDATA", @"C:\Users\me\AppData\Local")), NotAsked, NotAsked);
 
         Assert.Equal(@"C:\Users\me\AppData\Local\Pounce", home.Folder);
         Assert.Equal(@"C:\Users\me\AppData\Local\Pounce\bootstrap-secret", home.SecretFile);
@@ -307,12 +309,28 @@ public class PounceHomeTests
     }
 
     [Fact]
-    public void Pounce_home_wins_when_set()
+    public void A_full_pounce_home_wins_as_it_is()
     {
-        PounceHome home = PounceHome.Resolve(Variables(("POUNCE_HOME", @"D:\smoke\home")), () => throw new InvalidOperationException("not asked"));
+        PounceHome home = PounceHome.Resolve(Variables(("POUNCE_HOME", @"D:\smoke\home"), ("LOCALAPPDATA", @"C:\Local")), NotAsked, NotAsked);
 
         Assert.Equal(@"D:\smoke\home", home.Folder);
         Assert.Equal(@"D:\smoke\home\bootstrap-secret", home.SecretFile);
+    }
+
+    [Theory]
+    [InlineData("smoke")]
+    [InlineData("smoke/home")]
+    [InlineData("../smoke")]
+    public void A_relative_pounce_home_is_made_full_against_the_current_directory_so_the_engine_gets_the_same(string relative)
+    {
+        // The real Path.GetFullPath of this system: on Windows the Launcher runs it with Windows rules.
+        string current = Path.Combine(Path.GetTempPath(), "work", "dir");
+        string chosen = relative.Replace('/', Path.DirectorySeparatorChar);
+
+        PounceHome home = PounceHome.Resolve(Variables(("POUNCE_HOME", chosen)), NotAsked, () => current);
+
+        Assert.Equal(Path.GetFullPath(Path.Combine(current, chosen)), home.Folder);
+        Assert.True(Path.IsPathFullyQualified(home.Folder), home.Folder);
     }
 
     [Theory]
@@ -320,9 +338,64 @@ public class PounceHomeTests
     [InlineData("   ")]
     public void A_blank_pounce_home_is_ignored(string blank)
     {
-        PounceHome home = PounceHome.Resolve(Variables(("POUNCE_HOME", blank)), () => @"C:\Local");
+        PounceHome home = PounceHome.Resolve(Variables(("POUNCE_HOME", blank), ("LOCALAPPDATA", @"C:\Local")), NotAsked, NotAsked);
 
         Assert.Equal(@"C:\Local\Pounce", home.Folder);
+    }
+
+    /// <summary>
+    /// The Windows rows of the table every Pounce program checks itself against, so the Launcher, the Engine and the
+    /// <c>pounce</c> command agree on the home. Format in the file's first line.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(SharedWindowsCases))]
+    public void Agrees_with_the_shared_cases(string userHome, string? pounceHome, string? localAppData, string? xdgDataHome, string expected)
+    {
+        var variables = new Dictionary<string, string?>
+        {
+            ["POUNCE_HOME"] = pounceHome,
+            ["LOCALAPPDATA"] = localAppData,
+            ["XDG_DATA_HOME"] = xdgDataHome,
+        };
+
+        PounceHome home = PounceHome.Resolve(name => variables.GetValueOrDefault(name), () => userHome, NotAsked);
+
+        Assert.Equal(expected.Replace('\\', '/'), home.Folder.Replace('\\', '/'));
+    }
+
+    public static TheoryData<string, string?, string?, string?, string> SharedWindowsCases()
+    {
+        var cases = new TheoryData<string, string?, string?, string?, string>();
+        foreach (string line in File.ReadAllLines(SharedCasesFile()))
+        {
+            if (line.Length == 0 || line.StartsWith('#'))
+            {
+                continue;
+            }
+            string?[] fields = line.Split(',').Select(field => field switch { "" => null, "<blank>" => " ", _ => field }).ToArray();
+            Assert.Equal(6, fields.Length);
+            if (fields[0]!.StartsWith("Windows", StringComparison.Ordinal))
+            {
+                cases.Add(fields[1]!, fields[2], fields[3], fields[4], fields[5]!);
+            }
+        }
+        Assert.NotEmpty(cases);
+        return cases;
+    }
+
+    /// <summary>The table, found by walking up from the test's folder to the repository root.</summary>
+    private static string SharedCasesFile()
+    {
+        string relative = Path.Combine("pounce-platform", "src", "test", "resources", "pounce-home-cases.csv");
+        for (var folder = new DirectoryInfo(AppContext.BaseDirectory); folder is not null; folder = folder.Parent)
+        {
+            string candidate = Path.Combine(folder.FullName, relative);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+        throw new FileNotFoundException($"{relative} not found above {AppContext.BaseDirectory}");
     }
 }
 
@@ -330,7 +403,8 @@ public class ConfigurationTests
 {
     private static Configuration From(params (string Name, string Value)[] variables) => Configuration.FromEnvironment(
         name => variables.Where(v => v.Name == name).Select(v => v.Value).FirstOrDefault(),
-        () => @"C:\Users\me\AppData\Local");
+        () => @"C:\Users\me",
+        () => @"C:\Program Files\Pounce");
 
     [Fact]
     public void Defaults_without_any_variables()

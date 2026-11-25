@@ -5,7 +5,7 @@ namespace Pounce.Core;
 /// override the defaults, as for the <c>pounce</c> command.
 /// </summary>
 /// <param name="EngineUrl">The Engine's address: <c>POUNCE_URL</c>, or <see cref="DefaultEngineUrl"/>.</param>
-/// <param name="Home">The data folder: <c>POUNCE_HOME</c>, or <c>%LOCALAPPDATA%\Pounce</c>.</param>
+/// <param name="Home">The data folder: <c>POUNCE_HOME</c> (made full), or <c>%LOCALAPPDATA%\Pounce</c>.</param>
 /// <param name="HotKey">The shortcut that opens the panel: <c>POUNCE_HOTKEY</c>, or <see cref="HotKeySpec.Default"/>.</param>
 public sealed record Configuration(Uri EngineUrl, PounceHome Home, HotKeySpec HotKey)
 {
@@ -13,24 +13,27 @@ public sealed record Configuration(Uri EngineUrl, PounceHome Home, HotKeySpec Ho
     public static Uri DefaultEngineUrl { get; } = new("http://127.0.0.1:7431");
 
     /// <summary>The configuration from this process's environment.</summary>
-    public static Configuration FromEnvironment() =>
-        FromEnvironment(Environment.GetEnvironmentVariable, () => Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+    public static Configuration FromEnvironment() => FromEnvironment(
+        Environment.GetEnvironmentVariable,
+        () => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        Directory.GetCurrentDirectory);
 
     /// <summary>
     /// The configuration from <paramref name="environment"/>. A blank or invalid <c>POUNCE_URL</c> (it must be an
     /// absolute http or https address) gives the default, and so does an unknown <c>POUNCE_HOTKEY</c>.
     /// </summary>
     /// <param name="environment">Looks up an environment variable; null when unset.</param>
-    /// <param name="localAppData">The local application data folder (<c>%LOCALAPPDATA%</c>).</param>
-    public static Configuration FromEnvironment(Func<string, string?> environment, Func<string> localAppData)
+    /// <param name="userHome">The user's profile folder (see <see cref="PounceHome.Resolve(Func{string, string?}, Func{string}, Func{string})"/>).</param>
+    /// <param name="currentDirectory">This process's current directory, for a relative <c>POUNCE_HOME</c>.</param>
+    public static Configuration FromEnvironment(Func<string, string?> environment, Func<string> userHome, Func<string> currentDirectory)
     {
         ArgumentNullException.ThrowIfNull(environment);
-        ArgumentNullException.ThrowIfNull(localAppData);
         string? url = environment("POUNCE_URL")?.Trim();
         Uri engineUrl = Uri.TryCreate(url, UriKind.Absolute, out Uri? parsed) && (parsed.Scheme == Uri.UriSchemeHttp || parsed.Scheme == Uri.UriSchemeHttps)
             ? parsed
             : DefaultEngineUrl;
-        return new Configuration(engineUrl, PounceHome.Resolve(environment, localAppData), HotKeySpec.Parse(environment("POUNCE_HOTKEY")));
+        return new Configuration(engineUrl, PounceHome.Resolve(environment, userHome, currentDirectory),
+            HotKeySpec.Parse(environment("POUNCE_HOTKEY")));
     }
 
     /// <summary>A client for the Engine, logging in with the secret in <see cref="Home"/>. Keep it for the life of the app.</summary>
