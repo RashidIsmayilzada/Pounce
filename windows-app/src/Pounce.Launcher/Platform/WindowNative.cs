@@ -5,7 +5,8 @@ namespace Pounce.Launcher.Platform;
 
 /// <summary>
 /// The Win32 and DWM calls the search panel needs: monitors and DPI, position and z-order, window styles, the
-/// foreground window, and the Windows 11 look (rounded corners, acrylic backdrop, dark frame).
+/// foreground window, and the Windows 11 look (rounded corners, acrylic backdrop, dark frame). Also the error
+/// message box the app shows when it cannot go on.
 /// </summary>
 /// <remarks>
 /// Every call is cheap (no disk, no blocking on other processes) and every failure is reported to the caller,
@@ -52,6 +53,12 @@ internal static partial class WindowNative
     private const int SystemBackdropBuild = 22621;
 
     private const uint ASFW_ANY = 0xFFFF_FFFF;
+
+    // MessageBox (WinUser.h).
+    private const uint MB_OK = 0x0000_0000;
+    private const uint MB_ICONERROR = 0x0000_0010;
+    private const uint MB_SETFOREGROUND = 0x0001_0000;
+    private const uint MB_TOPMOST = 0x0004_0000;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT
@@ -278,6 +285,15 @@ internal static partial class WindowNative
     /// </summary>
     public static bool AllowAnyProcessToTakeForeground() => AllowSetForegroundWindow(ASFW_ANY);
 
+    /// <summary>
+    /// Shows an error message box and waits until it is closed. Win32's MessageBoxW rather than WPF's MessageBox,
+    /// for MB_TOPMOST (WPF's refuses that flag): the box must not open behind other windows, which it would when
+    /// Pounce may not take the foreground (started at sign-in, say). MB_SETFOREGROUND asks for the foreground too.
+    /// Works on any thread, without a WPF window or a running Application. False when it could not be shown.
+    /// </summary>
+    public static bool ShowError(string title, string text) =>
+        MessageBoxW(IntPtr.Zero, text, title, MB_OK | MB_ICONERROR | MB_SETFOREGROUND | MB_TOPMOST) != 0;
+
     private static int SetAttribute(IntPtr hwnd, uint attribute, int value) =>
         DwmSetWindowAttribute(hwnd, attribute, ref value, sizeof(int));
 
@@ -357,6 +373,10 @@ internal static partial class WindowNative
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool AttachThreadInput(uint idAttach, uint idAttachTo, [MarshalAs(UnmanagedType.Bool)] bool fAttach);
+
+    // int MessageBoxW(HWND hWnd, LPCWSTR lpText, LPCWSTR lpCaption, UINT uType); 0 on failure, else the button.
+    [LibraryImport("user32.dll", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    private static partial int MessageBoxW(IntPtr hWnd, string lpText, string lpCaption, uint uType);
 
     // BOOL AllowSetForegroundWindow(DWORD dwProcessId);
     [LibraryImport("user32.dll", SetLastError = true)]
