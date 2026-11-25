@@ -194,7 +194,9 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
         {
             return;
         }
-        if (shown && IsActive)
+        // The foreground window, not IsActive: after a refused activation, focusing the search field can make WPF
+        // report the window active while another program is in front. Then the shortcut must bring it forward.
+        if (shown && WindowNative.IsForeground(hwnd))
         {
             HidePanel();
         }
@@ -456,7 +458,10 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
     /// A panel that never got the focus never loses it either, so nothing would hide it when the user clicks
     /// elsewhere. While it is shown without the focus, check four times a second who is in front: once that is a
     /// window of another program other than the one in front when the panel was shown, the user has moved on, so hide.
-    /// Clicking the panel activates it and ends the watch (from then on, losing the focus hides it as usual).
+    /// Clicking the panel brings it to the foreground and ends the watch (from then on, losing the focus hides it as
+    /// usual). "In the foreground" is asked of Windows, not read from IsActive, which WPF can report as true for a
+    /// window that never got the foreground (FocusSearchField after a refused activation); the watch would stop at
+    /// once and the panel would never hide.
     /// </summary>
     private void WatchWhileUnfocused()
     {
@@ -465,7 +470,7 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
             unfocusedWatch = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(250) };
             unfocusedWatch.Tick += (_, _) =>
             {
-                if (!shown || IsActive)
+                if (!shown || WindowNative.IsForeground(hwnd))
                 {
                     unfocusedWatch.Stop();
                     return;
@@ -519,7 +524,7 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
     {
         focusCheckPending = false;
         TimeSpan sinceShown = TimeSpan.FromMilliseconds(Environment.TickCount64 - shownAt);
-        switch (PanelFocusPolicy.Decide(shown, IsActive, sinceShown, WindowNative.CurrentForegroundOwner()))
+        switch (PanelFocusPolicy.Decide(shown, WindowNative.IsForeground(hwnd), sinceShown, WindowNative.CurrentForegroundOwner()))
         {
             case FocusLossAction.Hide:
                 HidePanel();
