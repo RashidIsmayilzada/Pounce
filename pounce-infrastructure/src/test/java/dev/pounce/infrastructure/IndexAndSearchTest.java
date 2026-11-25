@@ -7,13 +7,18 @@ import dev.pounce.domain.Result;
 import dev.pounce.domain.Snippet;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
@@ -338,13 +343,22 @@ class IndexAndSearchTest {
                 .containsExactly(folder.resolve("projects/notes.md"));
     }
 
-    /** Opening a named pipe waits for a writer, forever: it must never be read, however it is reached. */
+    /**
+     * Opening a named pipe waits for a writer, forever: it must never be read, however it is reached.
+     * Windows has no named pipes inside folders (its pipes live under {@code \\.\pipe\}), and the {@code mkfifo} that
+     * Git for Windows brings along leaves an ordinary file, which is rightly indexed; so there is nothing to test there.
+     */
     @Test
+    @DisabledOnOs(value = OS.WINDOWS, disabledReason = "a folder on Windows cannot hold a named pipe")
     void a_named_pipe_in_a_watched_folder_is_never_read_or_indexed() throws IOException, InterruptedException {
         write("notes.md", "The canary rollout went fine.");
         Path pipe = folder.resolve("canary-pipe.txt");
         makeNamedPipe(pipe);
-        Files.createSymbolicLink(folder.resolve("canary-link.txt"), pipe);
+        try {
+            Files.createSymbolicLink(folder.resolve("canary-link.txt"), pipe);
+        } catch (IOException | UnsupportedOperationException e) {
+            assumeTrue(false, "cannot create a symbolic link here: " + e);
+        }
 
         assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
             engine.indexer().reconcile();
@@ -355,14 +369,27 @@ class IndexAndSearchTest {
         assertThat(fileNamesFound("canary")).containsExactly("notes.md");
     }
 
+    /** Skips the test, rather than failing it or waiting long, where no working {@code mkfifo} makes a real pipe. */
     private static void makeNamedPipe(Path path) throws InterruptedException {
-        int exit;
+        boolean made;
         try {
-            exit = new ProcessBuilder("mkfifo", path.toString()).inheritIO().start().waitFor();
+            Process mkfifo = new ProcessBuilder("mkfifo", path.toString()).inheritIO().start();
+            made = mkfifo.waitFor(5, TimeUnit.SECONDS) && mkfifo.exitValue() == 0;
+            mkfifo.destroyForcibly();
         } catch (IOException noMkfifo) {
-            exit = -1;
+            made = false;
         }
-        assumeTrue(exit == 0, "cannot make a named pipe here (no mkfifo)");
+        assumeTrue(made, "cannot make a named pipe here (no mkfifo, or it failed)");
+        assumeTrue(isSpecialFile(path), "mkfifo made something other than a named pipe here");
+    }
+
+    /** Neither a regular file, a folder nor a link: on Linux and macOS, a named pipe. */
+    private static boolean isSpecialFile(Path path) {
+        try {
+            return Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS).isOther();
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     @Test
