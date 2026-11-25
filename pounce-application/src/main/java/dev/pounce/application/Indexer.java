@@ -181,7 +181,14 @@ public final class Indexer {
             if (stored.filter(s -> s.equals(stamp) || s.equals(FileStamp.UNKNOWN)).isPresent()) {
                 return;
             }
-            String text = extractor.extract(file).orElse("");
+            String text;
+            try {
+                text = extractor.extract(file).orElse("");
+            } catch (IOException e) {
+                // Not "no text": store nothing, so the next reconcile or change reads it again.
+                LOG.log(System.Logger.Level.INFO, "Could not read {0} for now ({1}); will try again", file, e.toString());
+                return;
+            }
             List<Passage> passages = splitter.split(text, formatOf(file));
             List<float[]> vectors = embedder.embedPassages(passages.stream().map(Passage::text).toList());
             List<EmbeddedPassage> embedded = new ArrayList<>();

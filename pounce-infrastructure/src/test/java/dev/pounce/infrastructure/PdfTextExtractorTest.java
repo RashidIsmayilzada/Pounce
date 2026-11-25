@@ -8,8 +8,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Contract for reading PDFs: text from every page, and nothing (never an exception) when there is none to read. */
+/**
+ * Contract for reading PDFs: text from every page; nothing when there is none to read (a broken, locked-with-a-password
+ * or image-only PDF); an exception only when the file itself cannot be read right now.
+ */
 class PdfTextExtractorTest {
 
     @TempDir
@@ -37,6 +41,15 @@ class PdfTextExtractorTest {
         Path pdf = Files.write(folder.resolve("broken.pdf"), "%PDF-1.7 this is not really a pdf".getBytes());
 
         assertThat(extractor.extract(pdf)).isEmpty();
+    }
+
+    @Test
+    void a_pdf_that_cannot_be_opened_right_now_is_an_error_not_a_pdf_without_text() throws IOException {
+        Path pdf = TestPdfs.write(folder.resolve("plan.pdf"), "Canary rollout plan for Friday");
+
+        try (var _ = Unreadable.make(pdf)) {
+            assertThatThrownBy(() -> extractor.extract(pdf)).isInstanceOf(IOException.class);
+        }
     }
 
     @Test

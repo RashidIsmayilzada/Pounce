@@ -176,6 +176,20 @@ class IndexAndSearchTest {
     }
 
     @Test
+    void a_file_that_could_not_be_read_is_read_again_at_the_next_reconcile() throws IOException {
+        write("notes.md", "The canary rollout went fine.");
+        try (var _ = Unreadable.make(folder.resolve("notes.md"))) {
+            engine.indexer().reconcile();
+        }
+
+        engine.indexer().reconcile();
+
+        assertThat(engine.searcher().search(Query.of("canary"), Phase.FINAL))
+                .extracting(Result::path)
+                .containsExactly(folder.resolve("notes.md"));
+    }
+
+    @Test
     void a_document_without_readable_text_is_still_found_by_its_name() throws IOException {
         Files.write(folder.resolve("scanned-passport.pdf"), new byte[]{(byte) 0xFF, (byte) 0xFE, 0, 1, 2});
         engine.indexer().reconcile();

@@ -2,6 +2,7 @@ package dev.pounce.infrastructure;
 
 import dev.pounce.application.TextExtractor;
 
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Optional;
@@ -13,7 +14,7 @@ public final class FileTypeTextExtractor implements TextExtractor {
     private final TextExtractor plain = new PlainTextExtractor();
 
     @Override
-    public Optional<String> extract(Path file) {
+    public Optional<String> extract(Path file) throws IOException {
         boolean isPdf = file.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".pdf");
         return (isPdf ? pdf : plain).extract(file);
     }
