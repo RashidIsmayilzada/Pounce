@@ -227,8 +227,9 @@ public partial class App : Application
     /// </summary>
     private void StartBundledEngine(Configuration configuration, SearchModel model)
     {
-        var layout = EngineLayout.Bundled(AppContext.BaseDirectory, configuration.Home.Folder);
-        if (!File.Exists(layout.Jar))
+        // Null when POUNCE_URL names an Engine elsewhere: the Launcher then starts none of its own.
+        EngineLayout? layout = configuration.BundledEngine(AppContext.BaseDirectory);
+        if (layout is null || !File.Exists(layout.Jar))
         {
             return;
         }
