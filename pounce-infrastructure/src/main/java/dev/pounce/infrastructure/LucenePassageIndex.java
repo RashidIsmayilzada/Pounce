@@ -41,6 +41,7 @@ import org.apache.lucene.search.join.DiversifyingChildrenFloatKnnVectorQuery;
 import org.apache.lucene.search.join.QueryBitSetProducer;
 import org.apache.lucene.search.join.ScoreMode;
 import org.apache.lucene.search.join.ToParentBlockJoinQuery;
+import org.apache.lucene.store.AlreadyClosedException;
 import org.apache.lucene.store.ByteBuffersDirectory;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
@@ -48,14 +49,22 @@ import org.apache.lucene.store.FSDirectory;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * The Index as one Lucene index. Each Document is a block: one child per Passage (text + int8-quantized vector),
  * then a parent carrying the path and file name. Every entry in a block carries the path, so a single delete-by-term
  * removes the whole Document.
+ * <p>
+ * Writes are searchable at once (near-real-time reader) and committed to disk {@link #COMMIT_DELAY} after the first
+ * write that is not on disk yet, so whatever happens to the process, at most that much indexing work is lost.
  */
 public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
 
@@ -67,6 +76,15 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
     private static final String SIZE = "size";
     private static final String MODIFIED = "modified";
     private static final int CANDIDATES = 20;
+    private static final System.Logger LOG = System.getLogger(LucenePassageIndex.class.getName());
+
+    /**
+     * How long a write may wait before it is committed. A commit fsyncs the new segment files, so committing every
+     * write would make each save in an editor cost several fsyncs; waiting gathers a burst of saves, or the writes
+     * of a long reconcile, into one commit per interval. A crash loses at most this much work, which the next start
+     * redoes (files whose stamps were not committed are read again). Searching never waits for a commit.
+     */
+    static final Duration COMMIT_DELAY = Duration.ofSeconds(10);
     private static final int RRF_K = 60;
 
     /**
@@ -90,8 +108,12 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
     private final IndexWriter writer;
     private final SearcherManager searchers;
     private final BitSetProducer parents = new QueryBitSetProducer(new TermQuery(new Term(KIND, "document")));
+    private final Executor committer;
+    private final AtomicBoolean commitScheduled = new AtomicBoolean();
 
-    private LucenePassageIndex(Directory directory) {
+    private LucenePassageIndex(Directory directory, Duration commitDelay) {
+        this.committer = CompletableFuture.delayedExecutor(commitDelay.toMillis(), TimeUnit.MILLISECONDS,
+                task -> Thread.ofVirtual().name("index-commit").start(task));
         try {
             var config = new IndexWriterConfig(analyzer);
             config.setCodec(new Lucene104Codec() {
@@ -121,13 +143,17 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
     }
 
     public static LucenePassageIndex inMemory() {
-        return new LucenePassageIndex(new ByteBuffersDirectory());
+        return new LucenePassageIndex(new ByteBuffersDirectory(), COMMIT_DELAY);
     }
 
     /** Opens (or creates) the Index stored in this folder. */
     public static LucenePassageIndex open(Path folder) {
+        return open(folder, COMMIT_DELAY);
+    }
+
+    static LucenePassageIndex open(Path folder, Duration commitDelay) {
         try {
-            return new LucenePassageIndex(FSDirectory.open(folder));
+            return new LucenePassageIndex(FSDirectory.open(folder), commitDelay);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -208,6 +234,15 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
             return results(searcher, TopDocs.rrf(query.limit(), RRF_K, new TopDocs[]{keyword, semantic}),
                     textQuery(query));
         });
+    }
+
+    @Override
+    public void commit() {
+        try {
+            writer.commit();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     @Override
@@ -305,6 +340,22 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
             searchers.maybeRefreshBlocking();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        }
+        commitSoon();
+    }
+
+    /** Schedules one commit {@link #COMMIT_DELAY} from now, unless one is already on its way. */
+    private void commitSoon() {
+        if (commitScheduled.compareAndSet(false, true)) {
+            committer.execute(() -> {
+                commitScheduled.set(false);
+                try {
+                    commit();
+                } catch (UncheckedIOException | AlreadyClosedException e) {
+                    // Closed meanwhile: closing commits. Otherwise the next write or the next start tries again.
+                    LOG.log(System.Logger.Level.DEBUG, "Scheduled commit skipped", e);
+                }
+            });
         }
     }
 

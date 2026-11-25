@@ -71,6 +71,7 @@ public final class Indexer {
                 index.remove(document);
             }
         }
+        index.commit();
     }
 
     /**

@@ -9,7 +9,8 @@ import java.util.Optional;
 
 /**
  * Port: the on-disk Index. Every lookup returns at most one Result per Document, best first.
- * Writes are visible to the next lookup.
+ * Writes are visible to the next lookup, and reach the disk on their own a few seconds later, or at once on
+ * {@link #commit()}.
  */
 public interface PassageIndex {
     /** Store the Document at this path with these Passages, replacing whatever was stored for it before. */
@@ -28,6 +29,9 @@ public interface PassageIndex {
      * that differ only in letter case are equal, but they are different keys in the Index.
      */
     List<Path> documents();
+
+    /** Puts every write so far on disk, so it survives the Engine being stopped without warning. */
+    void commit();
 
     /** Keyword Matches on Passage text and file name; the last word of the Query also matches as a prefix. */
     List<Result> keyword(Query query);
