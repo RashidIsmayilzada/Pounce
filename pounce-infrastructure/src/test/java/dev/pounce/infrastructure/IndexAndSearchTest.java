@@ -15,6 +15,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /** The Indexer + Searcher seam: real files, real Lucene (in memory), fake embedder. */
 class IndexAndSearchTest {
@@ -272,7 +273,11 @@ class IndexAndSearchTest {
     @Test
     void a_file_reached_through_a_link_is_one_document() throws IOException {
         write("notes.md", "The canary rollout went fine.");
-        Files.createSymbolicLink(folder.resolve("shortcut.md"), folder.resolve("notes.md"));
+        try {
+            Files.createSymbolicLink(folder.resolve("shortcut.md"), folder.resolve("notes.md"));
+        } catch (IOException | UnsupportedOperationException e) {
+            assumeTrue(false, "cannot create a symbolic link here (on Windows it needs Developer Mode or admin): " + e);
+        }
         engine.indexer().reconcile();
 
         assertThat(engine.searcher().search(Query.of("canary"), Phase.FINAL))

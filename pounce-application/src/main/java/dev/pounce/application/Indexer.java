@@ -17,6 +17,7 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -226,7 +227,8 @@ public final class Indexer {
                 text = extractor.extract(file).orElse("");
             } catch (IOException e) {
                 // Not "no text": store nothing, so the next reconcile or change reads it again.
-                LOG.log(System.Logger.Level.INFO, "Could not read {0} for now ({1}); will try again", file, e.toString());
+                LOG.log(System.Logger.Level.INFO, "Could not read {0} for now ({1}); will try again",
+                        file, e.toString());
                 return;
             }
             List<Passage> passages = splitter.split(text, formatOf(file));
@@ -284,6 +286,7 @@ public final class Indexer {
     }
 
     private static TextFormat formatOf(Path file) {
-        return file.getFileName().toString().toLowerCase().endsWith(".md") ? TextFormat.MARKDOWN : TextFormat.PLAIN;
+        boolean markdown = file.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".md");
+        return markdown ? TextFormat.MARKDOWN : TextFormat.PLAIN;
     }
 }
