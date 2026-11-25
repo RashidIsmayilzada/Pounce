@@ -76,6 +76,10 @@ public partial class App : Application
             return;
         }
         Log.Info($"Starting Pounce (process {Environment.ProcessId})");
+        // At once, so that `Pounce.exe --quit` stops a Launcher that is still starting (SingleInstance hands a request
+        // that came earlier to this first subscriber). Shutdown is queued behind the rest of the startup and needs
+        // neither the panel nor the tray icon: OnExit cleans up whatever exists by then.
+        instance.QuitRequested += (_, _) => Dispatcher.BeginInvoke(new Action(Shutdown));
 
         var configuration = Configuration.FromEnvironment();
         FirstRun.EnsureSettings(configuration.Home);
@@ -95,8 +99,8 @@ public partial class App : Application
             EditSettings: () => shell.OpenInEditor(configuration.Home.ConfigFile),
             Quit: Shutdown));
 
+        // Only now that the panel exists: a request from a launch during the startup is kept until this subscription.
         instance.ShowRequested += (_, _) => Dispatcher.BeginInvoke(new Action(window.ShowPanel));
-        instance.QuitRequested += (_, _) => Dispatcher.BeginInvoke(new Action(Shutdown));
         if (Environment.GetEnvironmentVariable(FailStartupVariable) is { Length: > 0 })
         {
             // For the manual test plan: a failure once the Engine, tray icon, hotkey and mutex all exist.
