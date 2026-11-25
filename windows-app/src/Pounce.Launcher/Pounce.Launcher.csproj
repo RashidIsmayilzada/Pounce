@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The thin WPF shell. Logic belongs in Pounce.Core, where it can be tested on any OS. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- Without a RID, a build on Linux makes a Linux apphost ("Pounce") instead of Pounce.exe. -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <AssemblyName>Pounce</AssemblyName>
+    <RootNamespace>Pounce.Launcher</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\Pounce.ico</ApplicationIcon>
+    <!-- WFO0003 asks WinForms apps to set DPI mode in code. This is a WPF app that only borrows
+         NotifyIcon from WinForms; WPF reads DPI awareness from app.manifest, so the manifest is right. -->
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
+  </PropertyGroup>
+
+  <!-- Release and publish settings. Sizes measured by cross-publishing win-x64 from Linux with SDK 10.0.404. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <!-- The UI is English only: drops 13 culture folders (221 files, about 18 MB) of framework resources. -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- Precompile our own assemblies (the framework ones already are), so startup code is not JIT-compiled.
+         Works from Linux through the crossgen2 package. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <!-- Not set on purpose:
+         PublishTrimmed: the SDK refuses it for WPF (NETSDK1168) and WinForms (NETSDK1175).
+         PublishSingleFile: optional, pass -p:PublishSingleFile=true. Without IncludeNativeLibrariesForSelfExtract
+           it leaves the 5 native WPF DLLs next to Pounce.exe; with it, those are unpacked to %TEMP% on first run.
+         EnableCompressionInSingleFile: decompresses at every start; a zip of the folder is just as small.
+         TieredCompilation / TieredPGO: the defaults (on) are what ReadyToRun code is designed for. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- UseWindowsForms (for the tray icon) adds these global usings, which clash with WPF names
+         such as Application, MessageBox, Point and Color. Import them per file, or alias, where needed. -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Pounce.Core\Pounce.Core.csproj" />
+  </ItemGroup>
+
+</Project>

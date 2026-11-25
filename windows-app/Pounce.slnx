@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Pounce.Core/Pounce.Core.csproj" />
+    <Project Path="src/Pounce.Launcher/Pounce.Launcher.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Pounce.Core.Tests/Pounce.Core.Tests.csproj" />
+  </Folder>
+</Solution>

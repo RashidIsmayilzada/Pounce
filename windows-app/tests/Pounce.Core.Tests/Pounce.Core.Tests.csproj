@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <!-- Same results on every machine, and no ICU needed on minimal Linux boxes. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" Version="4.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <!-- xunit.v3 brings Microsoft.Testing.Extensions.Telemetry, which reports usage to Microsoft unless an
+         opt-out variable is set. Pounce sends nothing anywhere, so the hook that switches it on is removed. -->
+    <TestingPlatformBuilderHook Remove="98058041-B5B6-4A75-9834-58E6DF796A22" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Pounce.Core\Pounce.Core.csproj" />
+  </ItemGroup>
+
+</Project>

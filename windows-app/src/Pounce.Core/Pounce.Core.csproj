@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Testable logic of the Windows Launcher. Plain net10.0, no Windows-only APIs, so its tests run anywhere. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Pounce.Core</RootNamespace>
+  </PropertyGroup>
+
+</Project>

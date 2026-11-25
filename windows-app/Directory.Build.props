@@ -1,0 +1,25 @@
+<Project>
+  <!-- Shared by every project under windows-app/. -->
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Lets the Windows-only Launcher restore and build on Linux and macOS too. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <!-- Restore only the runtime packs a project uses; `publish -r win-x64` otherwise also fetches ASP.NET Core's (42 MB). -->
+    <DisableTransitiveFrameworkReferenceDownloads>true</DisableTransitiveFrameworkReferenceDownloads>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+    <!-- Release: line numbers in stack traces without separate .pdb files (about 18 KB in total). -->
+    <DebugType Condition="'$(Configuration)' == 'Release'">embedded</DebugType>
+
+    <!-- One version for everything: -p:Version=1.2.3 wins, then the POUNCE_VERSION environment variable, then 0.1.0. -->
+    <Version Condition="'$(Version)' == '' and '$(POUNCE_VERSION)' != ''">$(POUNCE_VERSION)</Version>
+    <Version Condition="'$(Version)' == ''">0.1.0</Version>
+
+    <Product>Pounce</Product>
+    <Company>Pounce</Company>
+    <Copyright>Copyright (c) 2026 Rashid Ismayilzada</Copyright>
+  </PropertyGroup>
+</Project>
