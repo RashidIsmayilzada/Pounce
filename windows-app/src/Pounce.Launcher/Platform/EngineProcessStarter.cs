@@ -19,16 +19,22 @@ public sealed class EngineProcessStarter : IProcessStarter
     public EngineProcessStarter(string logFile) => this.logFile = logFile;
 
     /// <inheritdoc/>
-    public IEngineProcess Start(string executable, IReadOnlyList<string> arguments,
+    /// <remarks>
+    /// The working directory is passed to <c>CreateProcessW</c> as Unicode, so the Engine's relative paths work whatever
+    /// the install folder's name. When the Engine exits, any crash report the JVM left there (or in the temp folder) is
+    /// moved next to the Engine log (<see cref="EngineCrashFiles"/>).
+    /// </remarks>
+    public IEngineProcess Start(string executable, string workingDirectory, IReadOnlyList<string> arguments,
         IReadOnlyDictionary<string, string> environment, Action<int> onExit)
     {
         ArgumentNullException.ThrowIfNull(executable);
+        ArgumentNullException.ThrowIfNull(workingDirectory);
         ArgumentNullException.ThrowIfNull(arguments);
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(onExit);
 
-        string folder = Path.GetDirectoryName(Path.GetFullPath(logFile))!;
-        Directory.CreateDirectory(folder);
+        string logFolder = Path.GetDirectoryName(Path.GetFullPath(logFile))!;
+        Directory.CreateDirectory(logFolder);
         var info = new ProcessStartInfo(executable)
         {
             UseShellExecute = false,
@@ -36,8 +42,8 @@ public sealed class EngineProcessStarter : IProcessStarter
             RedirectStandardInput = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            // The log folder was just created, so it surely exists; it is not on a drive the user may eject.
-            WorkingDirectory = folder,
+            // The install folder: every path in the arguments is relative to it (see EngineLayout).
+            WorkingDirectory = workingDirectory,
         };
         foreach (string argument in arguments)
         {
@@ -52,7 +58,7 @@ public sealed class EngineProcessStarter : IProcessStarter
         try
         {
             var process = new Process { StartInfo = info, EnableRaisingEvents = true };
-            var engine = new EngineProcess(process, log, onExit);
+            var engine = new EngineProcess(process, log, onExit, [workingDirectory, Path.GetTempPath()], logFolder);
             if (!process.Start())
             {
                 process.Dispose();
@@ -125,17 +131,21 @@ public sealed class EngineProcessStarter : IProcessStarter
         private readonly Process process;
         private readonly Stream log;
         private readonly Action<int> onExit;
+        private readonly IReadOnlyList<string> crashFolders;
+        private readonly string logFolder;
         private readonly Lock gate = new();
         private readonly ManualResetEventSlim drained = new();
         private int pipesOpen = 2;
         private int exitReported;
         private int terminated;
 
-        public EngineProcess(Process process, Stream log, Action<int> onExit)
+        public EngineProcess(Process process, Stream log, Action<int> onExit, IReadOnlyList<string> crashFolders, string logFolder)
         {
             this.process = process;
             this.log = log;
             this.onExit = onExit;
+            this.crashFolders = crashFolders;
+            this.logFolder = logFolder;
             process.Exited += OnExited;
         }
 
@@ -197,6 +207,7 @@ public sealed class EngineProcessStarter : IProcessStarter
                 Log.Warn("The Engine's output is still open after it exited (a process it started may hold it)");
             }
             Log.Info($"Engine exited with code {code}");
+            MoveCrashFiles();
             try
             {
                 onExit(code);
@@ -204,6 +215,27 @@ public sealed class EngineProcessStarter : IProcessStarter
             catch (Exception exception)
             {
                 Log.Warn("Handling the Engine's exit failed", exception);
+            }
+        }
+
+        /// <summary>
+        /// A JVM that crashed left its report in its working directory (the install folder) or the temp folder: into
+        /// the logs with it, where the user and a bug report find it, rather than cluttering the install folder.
+        /// </summary>
+        private void MoveCrashFiles()
+        {
+            int id;
+            try
+            {
+                id = process.Id; // still known once the process has exited
+            }
+            catch (InvalidOperationException)
+            {
+                return;
+            }
+            foreach (string moved in EngineCrashFiles.MoveToLogs(id, crashFolders, logFolder))
+            {
+                Log.Warn($"The Engine's Java runtime crashed; its report is in {moved}");
             }
         }
 

@@ -94,6 +94,25 @@ class PlatformDefaultsTest {
         assertThat(properties.watchedFolders()).containsExactly(notes);
     }
 
+    /**
+     * The Windows Launcher passes the home and the settings file in the environment, because java.exe reads its command
+     * line in the ANSI code page and a user name outside it would arrive as "?".
+     */
+    @Test
+    void the_windows_launcher_passes_the_home_and_the_settings_file_in_the_environment() throws IOException {
+        Files.createDirectories(userHome.resolve("Documents"));
+        Path home = Files.createDirectories(userHome.resolve("Рашид Əli 山田"));
+        Path notes = Files.createDirectories(userHome.resolve("notes"));
+        Path settings = Files.writeString(home.resolve("pounce.yml"), "pounce:\n  watched-folders: '" + notes + "'\n");
+
+        PounceProperties properties = start(Map.of(
+                "POUNCE_HOME", home.toString(),
+                "SPRING_CONFIG_ADDITIONALLOCATION", "optional:file:" + settings.toString().replace('\\', '/')), Map.of());
+
+        assertThat(properties.home()).isEqualTo(home);
+        assertThat(properties.watchedFolders()).containsExactly(notes);
+    }
+
     /** Only the settings, no Engine: a plain class, so component scanning in other tests never picks it up. */
     @EnableConfigurationProperties(PounceProperties.class)
     static class SettingsOnly {

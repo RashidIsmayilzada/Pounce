@@ -1,19 +1,39 @@
 namespace Pounce.Core;
 
 /// <summary>Where the bundled Engine's pieces are, and where it keeps its data.</summary>
-/// <param name="Java">The Java runtime's <c>java.exe</c>.</param>
-/// <param name="Jar">The Engine's jar.</param>
-/// <param name="ModelDir">The embedding model's folder.</param>
-/// <param name="Home">The data folder (see <see cref="PounceHome"/>).</param>
-/// <param name="OnnxRuntimeNatives">
-/// The folder holding ONNX Runtime's DLLs (<c>onnxruntime.dll</c>, <c>onnxruntime4j_jni.dll</c>,
-/// <c>onnxruntime_providers_shared.dll</c>), or null to let ONNX Runtime unpack them from its jar into <c>%TEMP%</c>
-/// as it does by default. Loading them from the install folder leaves no DLLs behind in <c>%TEMP%</c> (a loaded DLL
-/// can't be deleted, so each start would leave about 20 MB there) and works where policy forbids loading DLLs from it.
+/// <remarks>
+/// <para>No path that depends on the user travels on the Engine's command line. <c>java.exe</c> reads its command line
+/// in the system's ANSI code page (JDK-4488646), so a character that code page lacks, such as the Cyrillic, Greek,
+/// Chinese or Azerbaijani letters of many user names, arrives as <c>?</c>, and the Engine would never find its home.
+/// Environment variables reach Java as Unicode, so the home and the settings file go there (<see cref="Environment"/>),
+/// and the Engine runs in <see cref="AppFolder"/> with every path into the bundle relative to it
+/// (<see cref="Arguments"/>). Only the install folder itself must be representable, which the Java runtime inside it
+/// needs anyway.</para>
+/// <para>The JVM writes its crash report (<c>hs_err_pid*.log</c>) into its working directory, here the install folder,
+/// or into the temp folder when it may not write there; <see cref="EngineCrashFiles"/> moves it into the logs.</para>
+/// </remarks>
+/// <param name="AppFolder">
+/// The folder holding <c>Pounce.exe</c> and the bundle (<c>AppContext.BaseDirectory</c>), which is the Engine's working
+/// directory.
 /// </param>
-public sealed record EngineLayout(string Java, string Jar, string ModelDir, string Home, string? OnnxRuntimeNatives = null)
+/// <param name="Home">The data folder (see <see cref="PounceHome"/>), a full path.</param>
+/// <param name="BundlesOnnxRuntime">
+/// Whether the bundle holds ONNX Runtime's DLLs (<c>onnxruntime.dll</c>, <c>onnxruntime4j_jni.dll</c>,
+/// <c>onnxruntime_providers_shared.dll</c>) in <see cref="OnnxRuntimeNativesPath"/>; if not, ONNX Runtime unpacks them
+/// from its jar into <c>%TEMP%</c> as it does by default. Loading them from the install folder leaves no DLLs behind in
+/// <c>%TEMP%</c> (a loaded DLL can't be deleted, so each start would leave about 20 MB there) and works where policy
+/// forbids loading DLLs from it.
+/// </param>
+public sealed record EngineLayout(string AppFolder, string Home, bool BundlesOnnxRuntime = false)
 {
-    private static readonly IReadOnlyDictionary<string, string> NoVariables = new Dictionary<string, string>();
+    /// <summary>The Engine's jar, relative to <see cref="AppFolder"/>.</summary>
+    public const string JarPath = @"engine\pounce-engine.jar";
+
+    /// <summary>The embedding model's folder, relative to <see cref="AppFolder"/>.</summary>
+    public const string ModelPath = @"models\bge-small-en-v1.5";
+
+    /// <summary>The folder of ONNX Runtime's DLLs, relative to <see cref="AppFolder"/>.</summary>
+    public const string OnnxRuntimeNativesPath = @"native\onnxruntime";
 
     /// <summary>
     /// Next to <c>Pounce.exe</c>: <c>runtime\bin\java.exe</c>, <c>engine\pounce-engine.jar</c>,
@@ -25,42 +45,101 @@ public sealed record EngineLayout(string Java, string Jar, string ModelDir, stri
     public static EngineLayout Bundled(string appFolder, string home) => Bundled(appFolder, home, Directory.Exists);
 
     /// <summary><see cref="Bundled(string, string)"/>, asking <paramref name="folderExists"/> instead of the disk.</summary>
-    internal static EngineLayout Bundled(string appFolder, string home, Func<string, bool> folderExists)
-    {
-        string natives = WindowsPath.Join(appFolder, "native", "onnxruntime");
-        return new(
-            WindowsPath.Join(appFolder, "runtime", "bin", "java.exe"),
-            WindowsPath.Join(appFolder, "engine", "pounce-engine.jar"),
-            WindowsPath.Join(appFolder, "models", "bge-small-en-v1.5"),
-            home,
-            folderExists(natives) ? natives : null);
-    }
+    internal static EngineLayout Bundled(string appFolder, string home, Func<string, bool> folderExists) =>
+        new(appFolder, home, folderExists(WindowsPath.Join(appFolder, OnnxRuntimeNativesPath)));
+
+    /// <summary>The Java runtime's <c>java.exe</c>, as a full path: the program to start.</summary>
+    public string Java => WindowsPath.Join(AppFolder, "runtime", "bin", "java.exe");
+
+    /// <summary>The Engine's jar, as a full path (to check that the bundle has it).</summary>
+    public string Jar => WindowsPath.Join(AppFolder, JarPath);
+
+    /// <summary>The folder the Engine runs in, <see cref="AppFolder"/>: the paths in <see cref="Arguments"/> are relative to it.</summary>
+    public string WorkingDirectory => AppFolder;
 
     /// <summary>
     /// The JVM and Engine arguments, one string each (pass them through <c>ProcessStartInfo.ArgumentList</c>; nothing is
-    /// quoted). Small heap, low idle footprint and Lucene's SIMD path (see docs/research); settings the user can edit
-    /// live in <c>pounce.yml</c> next to the Index. The Engine exits when this process does, even if it is killed.
+    /// quoted). Small heap, low idle footprint and Lucene's SIMD path (see docs/research). The Engine exits when this
+    /// process does, even if it is killed. Every path is relative to <see cref="WorkingDirectory"/>; none names the user.
     /// </summary>
     public IReadOnlyList<string> Arguments => ArgumentsFor(System.Environment.ProcessId);
 
-    /// <summary>Extra environment variables for the Engine: none on Windows (the Engine makes no network calls by itself).</summary>
-    public IReadOnlyDictionary<string, string> Environment => NoVariables;
+    /// <summary>
+    /// The variables that carry the paths that depend on the user, as Unicode, overriding any the Launcher was started
+    /// with: <c>POUNCE_HOME</c>, the data folder (Spring binds it to <c>pounce.home</c>), and
+    /// <c>SPRING_CONFIG_ADDITIONALLOCATION</c> (Spring Boot's name for <c>spring.config.additional-location</c>): the
+    /// settings the user can edit, <c>pounce.yml</c> next to the Index.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> Environment => new Dictionary<string, string>
+    {
+        ["POUNCE_HOME"] = Home,
+        // Spring reads this as a URL, so the whole path takes forward slashes: optional:file:C:/Users/me/...
+        ["SPRING_CONFIG_ADDITIONALLOCATION"] = "optional:file:" + new PounceHome(Home).ConfigFile.Replace('\\', '/'),
+    };
 
     /// <summary>The arguments, with the Engine watching the process <paramref name="parentProcessId"/>.</summary>
     internal IReadOnlyList<string> ArgumentsFor(int parentProcessId) =>
     [
         "-Xmx256m", "-XX:+UseG1GC", "-XX:+UseCompactObjectHeaders", "-XX:G1PeriodicGCInterval=60000",
         "--add-modules", "jdk.incubator.vector", "--enable-native-access=ALL-UNNAMED",
-        // Spring reads this as a URL, so the whole path takes forward slashes: optional:file:C:/Users/me/...
-        "-Dspring.config.additional-location=optional:file:" + new PounceHome(Home).ConfigFile.Replace('\\', '/'),
         $"-Dpounce.parent-pid={parentProcessId}",
-        // A native path, unlike the URL above. ONNX Runtime then loads its DLLs from there instead of unpacking them into
-        // %TEMP% (and fails to start if onnxruntime.dll or onnxruntime4j_jni.dll is missing there).
-        .. (OnnxRuntimeNatives is null ? (string[])[] : [$"-Donnxruntime.native.path={OnnxRuntimeNatives}"]),
-        "-jar", Jar,
-        $"--pounce.home={Home}",
-        $"--pounce.model-dir={ModelDir}",
+        // ONNX Runtime makes this absolute, against the working directory, and loads its DLLs from there instead of
+        // unpacking them into %TEMP% (and fails to start if onnxruntime.dll or onnxruntime4j_jni.dll is missing there).
+        .. (BundlesOnnxRuntime ? [$"-Donnxruntime.native.path={OnnxRuntimeNativesPath}"] : (string[])[]),
+        "-jar", JarPath,
+        $"--pounce.model-dir={ModelPath}",
     ];
+}
+
+/// <summary>
+/// The JVM's crash files for one Engine process: the report (<c>hs_err_pid&lt;pid&gt;.log</c>), the minidump Windows
+/// gets with it (<c>hs_err_pid&lt;pid&gt;.mdmp</c>) and the JIT compiler's replay file (<c>replay_pid&lt;pid&gt;.log</c>).
+/// The JVM writes them into its working directory, the install folder, or into the temp folder when it may not write
+/// there; when it can write neither, it prints the report to its output, which goes to the Engine log anyway.
+/// </summary>
+public static class EngineCrashFiles
+{
+    /// <summary>
+    /// Moves the crash files of process <paramref name="processId"/> from <paramref name="folders"/> into
+    /// <paramref name="logFolder"/>, replacing older ones of the same name, and returns their new paths. A file that
+    /// can't be moved stays where it is. Never throws for a missing file or folder.
+    /// </summary>
+    /// <param name="processId">The Engine's process id.</param>
+    /// <param name="folders">Where the JVM may have written them: its working directory and the temp folder.</param>
+    /// <param name="logFolder">The logs folder in the home.</param>
+    public static IReadOnlyList<string> MoveToLogs(int processId, IEnumerable<string> folders, string logFolder)
+    {
+        ArgumentNullException.ThrowIfNull(folders);
+        ArgumentNullException.ThrowIfNull(logFolder);
+        var moved = new List<string>();
+        foreach (string folder in folders)
+        {
+            foreach (string name in NamesFor(processId))
+            {
+                string from = Path.Combine(folder, name);
+                string to = Path.Combine(logFolder, name);
+                try
+                {
+                    if (!File.Exists(from))
+                    {
+                        continue;
+                    }
+                    Directory.CreateDirectory(logFolder);
+                    File.Move(from, to, overwrite: true);
+                    moved.Add(to);
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    // Still open, or not ours to move: it stays where the JVM said it is (in the Engine log).
+                }
+            }
+        }
+        return moved;
+    }
+
+    /// <summary>The names the JVM gives the crash files of process <paramref name="processId"/>.</summary>
+    public static IReadOnlyList<string> NamesFor(int processId) =>
+        [$"hs_err_pid{processId}.log", $"hs_err_pid{processId}.mdmp", $"replay_pid{processId}.log"];
 }
 
 /// <summary>A running Engine process.</summary>
@@ -74,16 +153,17 @@ public interface IEngineProcess
 public interface IProcessStarter
 {
     /// <summary>
-    /// Starts <paramref name="executable"/> with <paramref name="arguments"/> (one string each, for
-    /// <c>ProcessStartInfo.ArgumentList</c>) and <paramref name="environment"/> added to this process's own.
-    /// Throws if it can't start.
+    /// Starts <paramref name="executable"/> in <paramref name="workingDirectory"/> with <paramref name="arguments"/> (one
+    /// string each, for <c>ProcessStartInfo.ArgumentList</c>) and <paramref name="environment"/> added to this process's
+    /// own. Throws if it can't start.
     /// </summary>
-    /// <param name="executable">The program to run.</param>
+    /// <param name="executable">The program to run, a full path.</param>
+    /// <param name="workingDirectory">The folder it runs in; relative paths in its arguments are relative to it.</param>
     /// <param name="arguments">Its arguments, unquoted.</param>
     /// <param name="environment">Variables to add or override.</param>
     /// <param name="onExit">Called once with the exit code when the process ends, on any thread.</param>
-    IEngineProcess Start(string executable, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment,
-        Action<int> onExit);
+    IEngineProcess Start(string executable, string workingDirectory, IReadOnlyList<string> arguments,
+        IReadOnlyDictionary<string, string> environment, Action<int> onExit);
 }
 
 /// <summary>Answers whether an Engine is already listening (for example one left from an earlier run).</summary>
@@ -213,7 +293,8 @@ public sealed class EngineSupervisor
         int launch = ++_launch;
         try
         {
-            _process = _starter.Start(_layout.Java, _layout.Arguments, _layout.Environment, code => OnExit(launch, code));
+            _process = _starter.Start(_layout.Java, _layout.WorkingDirectory, _layout.Arguments, _layout.Environment,
+                code => OnExit(launch, code));
             SetState(EngineState.Running);
         }
         catch (Exception e)

@@ -18,14 +18,9 @@ public class EngineSupervisorTests
         Assert.Equal(EngineState.Running, supervisor.State);
         FakeStarter.Launch launch = Assert.Single(_starter.Started);
         Assert.Equal(@"C:\Program Files\Pounce\runtime\bin\java.exe", launch.Executable);
-        Assert.Equal(
-            [
-                "-jar", @"C:\Program Files\Pounce\engine\pounce-engine.jar",
-                @"--pounce.home=C:\Users\me\AppData\Local\Pounce",
-                @"--pounce.model-dir=C:\Program Files\Pounce\models\bge-small-en-v1.5",
-            ],
-            launch.Arguments.TakeLast(4));
-        Assert.Empty(launch.Environment);
+        Assert.Equal(@"C:\Program Files\Pounce", launch.WorkingDirectory);
+        Assert.Equal(["-jar", @"engine\pounce-engine.jar", @"--pounce.model-dir=models\bge-small-en-v1.5"], launch.Arguments.TakeLast(3));
+        Assert.Equal(@"C:\Users\me\AppData\Local\Pounce", launch.Environment["POUNCE_HOME"]);
     });
 
     [Fact]
@@ -147,35 +142,59 @@ public class EngineSupervisorTests
 public class EngineLayoutTests
 {
     [Fact]
-    public void The_bundled_engine_sits_next_to_pounce_exe()
+    public void The_bundled_engine_sits_next_to_pounce_exe_and_runs_there()
     {
-        var layout = EngineLayout.Bundled(@"C:\Program Files\Pounce\", @"C:\Users\me\AppData\Local\Pounce");
+        var layout = EngineLayout.Bundled(@"C:\Program Files\Pounce\", @"C:\Users\me\AppData\Local\Pounce", _ => false);
 
-        Assert.Equal(
-            new EngineLayout(
-                @"C:\Program Files\Pounce\runtime\bin\java.exe",
-                @"C:\Program Files\Pounce\engine\pounce-engine.jar",
-                @"C:\Program Files\Pounce\models\bge-small-en-v1.5",
-                @"C:\Users\me\AppData\Local\Pounce"),
-            layout);
+        Assert.Equal(new EngineLayout(@"C:\Program Files\Pounce\", @"C:\Users\me\AppData\Local\Pounce"), layout);
+        Assert.Equal(@"C:\Program Files\Pounce\runtime\bin\java.exe", layout.Java);
+        Assert.Equal(@"C:\Program Files\Pounce\engine\pounce-engine.jar", layout.Jar);
+        Assert.Equal(@"C:\Program Files\Pounce\", layout.WorkingDirectory);
     }
 
     [Fact]
-    public void The_jvm_gets_the_same_arguments_as_on_macos_with_windows_paths()
+    public void The_jvm_gets_the_same_flags_as_on_macos_and_only_paths_relative_to_the_install_folder()
     {
-        var layout = EngineLayout.Bundled(@"C:\Program Files\Pounce", @"C:\Users\me\AppData\Local\Pounce");
+        var layout = EngineLayout.Bundled(@"C:\Program Files\Pounce", @"C:\Users\me\AppData\Local\Pounce", _ => false);
 
         Assert.Equal(
             [
                 "-Xmx256m", "-XX:+UseG1GC", "-XX:+UseCompactObjectHeaders", "-XX:G1PeriodicGCInterval=60000",
                 "--add-modules", "jdk.incubator.vector", "--enable-native-access=ALL-UNNAMED",
-                "-Dspring.config.additional-location=optional:file:C:/Users/me/AppData/Local/Pounce/pounce.yml",
                 "-Dpounce.parent-pid=4242",
-                "-jar", @"C:\Program Files\Pounce\engine\pounce-engine.jar",
-                @"--pounce.home=C:\Users\me\AppData\Local\Pounce",
-                @"--pounce.model-dir=C:\Program Files\Pounce\models\bge-small-en-v1.5",
+                "-jar", @"engine\pounce-engine.jar",
+                @"--pounce.model-dir=models\bge-small-en-v1.5",
             ],
             layout.ArgumentsFor(4242));
+    }
+
+    [Theory]
+    [InlineData(@"C:\Users\Рашид Əli\AppData\Local\Pounce")]
+    [InlineData(@"C:\Users\Łukasz\AppData\Local\Pounce")]
+    [InlineData(@"C:\Users\山田\AppData\Local\Pounce")]
+    public void Paths_that_name_the_user_travel_in_the_environment_never_on_the_command_line(string home)
+    {
+        var layout = EngineLayout.Bundled(@"C:\Program Files\Pounce", home, _ => true);
+
+        // java.exe reads its command line in the ANSI code page, which may lack these letters; its environment is Unicode.
+        Assert.All(layout.ArgumentsFor(4242), argument => Assert.True(argument.All(char.IsAscii), argument));
+        Assert.DoesNotContain(layout.ArgumentsFor(4242), argument => argument.Contains("Users", StringComparison.Ordinal));
+        Assert.Equal(
+            new Dictionary<string, string>
+            {
+                ["POUNCE_HOME"] = home,
+                // Spring reads it as a URL: forward slashes throughout.
+                ["SPRING_CONFIG_ADDITIONALLOCATION"] = "optional:file:" + home.Replace('\\', '/') + "/pounce.yml",
+            },
+            layout.Environment);
+    }
+
+    [Fact]
+    public void The_settings_file_is_a_url_with_forward_slashes()
+    {
+        var layout = EngineLayout.Bundled(@"C:\Program Files\Pounce", @"C:\Users\me\AppData\Local\Pounce", _ => false);
+
+        Assert.Equal("optional:file:C:/Users/me/AppData/Local/Pounce/pounce.yml", layout.Environment["SPRING_CONFIG_ADDITIONALLOCATION"]);
     }
 
     [Fact]
@@ -186,18 +205,16 @@ public class EngineLayoutTests
             folder => { asked.Add(folder); return true; });
 
         Assert.Equal([@"C:\Program Files\Pounce\native\onnxruntime"], asked);
-        Assert.Equal(@"C:\Program Files\Pounce\native\onnxruntime", layout.OnnxRuntimeNatives);
+        Assert.True(layout.BundlesOnnxRuntime);
         Assert.Equal(
             [
                 "-Xmx256m", "-XX:+UseG1GC", "-XX:+UseCompactObjectHeaders", "-XX:G1PeriodicGCInterval=60000",
                 "--add-modules", "jdk.incubator.vector", "--enable-native-access=ALL-UNNAMED",
-                "-Dspring.config.additional-location=optional:file:C:/Users/me/AppData/Local/Pounce/pounce.yml",
                 "-Dpounce.parent-pid=4242",
-                // A native path, not a URL: backslashes, and no quotes (ArgumentList quotes the space itself).
-                @"-Donnxruntime.native.path=C:\Program Files\Pounce\native\onnxruntime",
-                "-jar", @"C:\Program Files\Pounce\engine\pounce-engine.jar",
-                @"--pounce.home=C:\Users\me\AppData\Local\Pounce",
-                @"--pounce.model-dir=C:\Program Files\Pounce\models\bge-small-en-v1.5",
+                // Relative: ONNX Runtime makes it absolute against the working directory before it loads the DLLs.
+                @"-Donnxruntime.native.path=native\onnxruntime",
+                "-jar", @"engine\pounce-engine.jar",
+                @"--pounce.model-dir=models\bge-small-en-v1.5",
             ],
             layout.ArgumentsFor(4242));
     }
@@ -207,9 +224,8 @@ public class EngineLayoutTests
     {
         var layout = EngineLayout.Bundled(@"C:\Program Files\Pounce\", @"C:\Users\me\AppData\Local\Pounce", _ => false);
 
-        Assert.Null(layout.OnnxRuntimeNatives);
+        Assert.False(layout.BundlesOnnxRuntime);
         Assert.DoesNotContain(layout.ArgumentsFor(4242), argument => argument.Contains("onnxruntime", StringComparison.Ordinal));
-        Assert.Equal(EngineLayout.Bundled(@"C:\Program Files\Pounce\", @"C:\Users\me\AppData\Local\Pounce"), layout);
     }
 
     [Fact]
@@ -218,7 +234,59 @@ public class EngineLayoutTests
         var layout = EngineLayout.Bundled(@"C:\Pounce", @"C:\Data");
 
         Assert.Contains($"-Dpounce.parent-pid={Environment.ProcessId}", layout.Arguments);
-        Assert.Empty(layout.Environment);
+    }
+}
+
+/// <summary>A JVM crash leaves its report in the install folder or the temp folder; the Launcher moves it to the logs.</summary>
+public sealed class EngineCrashFilesTests : IDisposable
+{
+    private readonly TempFolder _temp = new();
+
+    public void Dispose() => _temp.Dispose();
+
+    [Fact]
+    public void Moves_the_crash_files_of_that_process_into_the_logs()
+    {
+        string app = _temp.Folder("app");
+        string tmp = _temp.Folder("tmp");
+        string logs = Path.Combine(_temp.Root, "home", "logs");
+        _temp.File("app/hs_err_pid4242.log", "crash");
+        _temp.File("app/replay_pid4242.log", "replay");
+        _temp.File("tmp/hs_err_pid4242.mdmp", "dump");
+        _temp.File("app/hs_err_pid4243.log", "another process");
+        _temp.File("app/pounce-engine.log", "not a crash file");
+
+        IReadOnlyList<string> moved = EngineCrashFiles.MoveToLogs(4242, [app, tmp], logs);
+
+        Assert.Equal(
+            [Path.Combine(logs, "hs_err_pid4242.log"), Path.Combine(logs, "replay_pid4242.log"), Path.Combine(logs, "hs_err_pid4242.mdmp")],
+            moved);
+        Assert.Equal("crash", File.ReadAllText(Path.Combine(logs, "hs_err_pid4242.log")));
+        Assert.Equal(["hs_err_pid4243.log", "pounce-engine.log"],
+            Directory.GetFiles(app).Select(Path.GetFileName).Order(StringComparer.Ordinal));
+        Assert.Empty(Directory.GetFiles(tmp));
+    }
+
+    [Fact]
+    public void A_report_of_an_earlier_process_with_the_same_id_is_replaced()
+    {
+        string app = _temp.Folder("app");
+        string logs = _temp.Folder("logs");
+        _temp.File("logs/hs_err_pid7.log", "old");
+        _temp.File("app/hs_err_pid7.log", "new");
+
+        EngineCrashFiles.MoveToLogs(7, [app], logs);
+
+        Assert.Equal("new", File.ReadAllText(Path.Combine(logs, "hs_err_pid7.log")));
+    }
+
+    [Fact]
+    public void No_crash_and_missing_folders_move_nothing()
+    {
+        string logs = Path.Combine(_temp.Root, "logs");
+
+        Assert.Empty(EngineCrashFiles.MoveToLogs(7, [_temp.Folder("app"), Path.Combine(_temp.Root, "nowhere")], logs));
+        Assert.False(Directory.Exists(logs));
     }
 }
 
@@ -347,19 +415,21 @@ internal sealed class FakeProbe(bool alive, TaskCompletionSource<bool>? answered
 
 internal sealed class FakeStarter : IProcessStarter
 {
-    public sealed record Launch(string Executable, IReadOnlyList<string> Arguments, IReadOnlyDictionary<string, string> Environment);
+    public sealed record Launch(string Executable, string WorkingDirectory, IReadOnlyList<string> Arguments,
+        IReadOnlyDictionary<string, string> Environment);
 
     public List<Launch> Started { get; } = [];
     public List<FakeProcess> Processes { get; } = [];
     public Exception? Failure { get; set; }
 
-    public IEngineProcess Start(string executable, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment, Action<int> onExit)
+    public IEngineProcess Start(string executable, string workingDirectory, IReadOnlyList<string> arguments,
+        IReadOnlyDictionary<string, string> environment, Action<int> onExit)
     {
         if (Failure is not null)
         {
             throw Failure;
         }
-        Started.Add(new Launch(executable, arguments, environment));
+        Started.Add(new Launch(executable, workingDirectory, arguments, environment));
         var process = new FakeProcess(onExit);
         Processes.Add(process);
         return process;
