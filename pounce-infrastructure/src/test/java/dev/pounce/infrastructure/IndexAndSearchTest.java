@@ -193,8 +193,31 @@ class IndexAndSearchTest {
                 .containsExactly(folder.resolve("locked/secret.md"));
     }
 
+    /** A USB disk that is unplugged, a mapped drive while off the VPN: its Documents wait for it to come back. */
     @Test
-    void a_watched_folder_that_does_not_exist_is_skipped() throws IOException {
+    void a_watched_folder_that_does_not_exist_for_now_is_skipped_and_keeps_its_documents() throws IOException {
+        write("drive/plan.md", "The canary plan for the drive.");
+        write("laptop/notes.md", "The canary rollout went fine.");
+        var embedder = new HashingEmbedder();
+        engine = TestEngine.over(List.of(folder.resolve("drive"), folder.resolve("laptop")),
+                TestEngine.exclusionsFor(folder), embedder, LucenePassageIndex.inMemory());
+        engine.indexer().reconcile();
+        int embeddedAtFirst = embedder.passagesEmbedded;
+
+        Files.move(folder.resolve("drive"), folder.resolve("unplugged"));
+        engine.indexer().reconcile();
+
+        assertThat(fileNamesFound("canary")).containsExactlyInAnyOrder("plan.md", "notes.md");
+
+        Files.move(folder.resolve("unplugged"), folder.resolve("drive"));
+        engine.indexer().reconcile();
+
+        assertThat(fileNamesFound("canary")).containsExactlyInAnyOrder("plan.md", "notes.md");
+        assertThat(embedder.passagesEmbedded).as("nothing read again").isEqualTo(embeddedAtFirst);
+    }
+
+    @Test
+    void a_watched_folder_that_never_existed_is_skipped() throws IOException {
         write("notes.md", "The canary rollout went fine.");
         engine = TestEngine.over(List.of(folder.resolve("unplugged-drive"), folder), TestEngine.exclusionsFor(folder),
                 new HashingEmbedder(), LucenePassageIndex.inMemory());

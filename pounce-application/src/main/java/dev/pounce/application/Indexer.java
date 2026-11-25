@@ -50,7 +50,9 @@ public final class Indexer {
 
     /**
      * Walk every Watched Folder and make the whole Index agree with disk. A Watched Folder that does not exist, and
-     * a file or folder that cannot be read, is logged and skipped; the rest is still indexed.
+     * a file or folder that cannot be read, is logged and skipped; the rest is still indexed. The Documents in what
+     * was skipped are kept: an unplugged disk or a network drive while offline comes back, and reading everything
+     * on it again would cost minutes.
      */
     public void reconcile() {
         // Keys are compared as text: on Windows, paths that differ only in letter case are equal.
@@ -59,6 +61,7 @@ public final class Indexer {
         for (WatchedFolder folder : folders) {
             Optional<Path> root = existingRoot(folder);
             if (root.isEmpty()) {
+                unreadable.add(lastKnownLocation(folder.path()));
                 continue;
             }
             walk(root.get(), root.get(), file -> {
@@ -296,11 +299,20 @@ public final class Indexer {
         }
     }
 
-    /** A deleted file has no real path any more; resolve its folder instead, which matches how it was stored. */
-    private static Path lastKnownLocation(Path deleted) throws IOException {
-        Path absolute = deleted.toAbsolutePath().normalize();
-        Path parent = absolute.getParent();
-        return parent != null && Files.exists(parent) ? parent.toRealPath().resolve(absolute.getFileName()) : absolute;
+    /**
+     * A path that is gone has no real path any more; resolve the nearest folder above it that still exists instead,
+     * which matches how it was stored.
+     */
+    private static Path lastKnownLocation(Path gone) {
+        Path absolute = gone.toAbsolutePath().normalize();
+        for (Path above = absolute.getParent(); above != null; above = above.getParent()) {
+            try {
+                return above.toRealPath().resolve(above.relativize(absolute));
+            } catch (IOException goneToo) {
+                // Try the next folder up.
+            }
+        }
+        return absolute;
     }
 
     private static TextFormat formatOf(Path file) {
