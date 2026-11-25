@@ -19,6 +19,10 @@ namespace Pounce.Launcher.Platform;
 /// <item><c>Local\Pounce.Launcher.Process</c>, 4 bytes of shared memory holding the running instance's process id,
 /// so that another launch can let it take the foreground and wait for its process to end.</item>
 /// </list>
+/// The objects have the creating token's default security. One made by a Pounce run as administrator cannot be opened
+/// by a normal launch (<see cref="UnauthorizedAccessException"/>): that launch treats it as another Pounce that runs
+/// and cannot be signalled, logs so, and neither starts a second one nor waits for it. The objects' security is left
+/// as it is.
 /// </remarks>
 public sealed class SingleInstance : IDisposable
 {
@@ -26,6 +30,9 @@ public sealed class SingleInstance : IDisposable
     private const string ShowName = @"Local\Pounce.Launcher.Show";
     private const string QuitName = @"Local\Pounce.Launcher.Quit";
     private const string ProcessName = @"Local\Pounce.Launcher.Process";
+
+    /// <summary>What to do about a running Pounce this launch may not reach.</summary>
+    private const string Elevated = "Quit that one from its tray icon (or from Task Manager), then start Pounce again.";
 
     private readonly Mutex mutex;
     private readonly MemoryMappedFile? processId;
@@ -79,7 +86,8 @@ public sealed class SingleInstance : IDisposable
     }
 
     /// <summary>Becomes the running instance, or returns null when another Pounce already is.</summary>
-    /// <remarks>If the kernel objects cannot be made at all, this launch runs rather than nothing running.</remarks>
+    /// <remarks>If the kernel objects cannot be made at all, this launch runs rather than nothing running. If they
+    /// exist but may not be opened, another Pounce runs (as administrator): null.</remarks>
     public static SingleInstance? TryAcquire()
     {
         EventWaitHandle? show = null;
@@ -113,6 +121,18 @@ public sealed class SingleInstance : IDisposable
             quit.Reset();
             return new SingleInstance(mutex, show, quit);
         }
+        catch (UnauthorizedAccessException e)
+        {
+            // The objects exist but this token may not open them: a Pounce runs under another token, which with
+            // these default-security objects means one run as administrator. Running anyway would start a second
+            // launcher, tray icon and Engine on the same home and port.
+            Log.Warn($"Another Pounce, probably run as administrator, is already running and this one may not open "
+                + $"its single-instance objects; not starting a second one. {Elevated}", e);
+            mutex?.Dispose();
+            show?.Dispose();
+            quit?.Dispose();
+            return null;
+        }
         catch (Exception e)
         {
             // Without the kernel objects one Pounce cannot be told from two; running beats not running.
@@ -142,6 +162,10 @@ public sealed class SingleInstance : IDisposable
             using var show = new EventWaitHandle(false, EventResetMode.AutoReset, ShowName);
             show.Set();
         }
+        catch (UnauthorizedAccessException e)
+        {
+            Log.Warn($"Another Pounce, probably run as administrator, is running and cannot be asked to show its panel. {Elevated}", e);
+        }
         catch (Exception e)
         {
             Log.Warn("Could not ask the running Pounce to show its panel", e);
@@ -149,7 +173,7 @@ public sealed class SingleInstance : IDisposable
     }
 
     /// <summary>Asks the running instance to quit and waits until it has exited or the time is up.
-    /// True when no instance is running afterwards.</summary>
+    /// True when no instance is running afterwards; false at once for one this launch may not signal.</summary>
     public static bool SignalQuit(TimeSpan timeout)
     {
         try
@@ -176,6 +200,12 @@ public sealed class SingleInstance : IDisposable
                 return exited;
             }
             return WaitForMutex(timeout); // an instance that has not published its id yet
+        }
+        catch (UnauthorizedAccessException e)
+        {
+            // It cannot be told to quit, so waiting for it would only use up the time.
+            Log.Warn($"Another Pounce, probably run as administrator, is running and cannot be asked to quit. {Elevated}", e);
+            return false;
         }
         catch (Exception e)
         {
