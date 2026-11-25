@@ -33,6 +33,11 @@ public sealed class SingleInstance : IDisposable
     private readonly EventWaitHandle quit;
     private readonly ManualResetEvent stop = new(false);
     private readonly Thread listener;
+    private readonly Lock gate = new();
+    private EventHandler? showRequested;
+    private EventHandler? quitRequested;
+    private bool showPending;
+    private bool quitPending;
     private int disposed;
 
     private SingleInstance(Mutex mutex, EventWaitHandle show, EventWaitHandle quit)
@@ -45,11 +50,33 @@ public sealed class SingleInstance : IDisposable
         listener.Start();
     }
 
-    /// <summary>Raised (on any thread) when another launch asks this one to show the panel.</summary>
-    public event EventHandler? ShowRequested;
+    /// <summary>Raised (on any thread) when another launch asks this one to show the panel. A request that came
+    /// before anyone subscribed is raised to the first subscriber, on the subscribing thread.</summary>
+    public event EventHandler? ShowRequested
+    {
+        add => Subscribe(ref showRequested, ref showPending, value);
+        remove
+        {
+            lock (gate)
+            {
+                showRequested -= value;
+            }
+        }
+    }
 
-    /// <summary>Raised (on any thread) when <c>Pounce.exe --quit</c> asks this one to quit.</summary>
-    public event EventHandler? QuitRequested;
+    /// <summary>Raised (on any thread) when <c>Pounce.exe --quit</c> asks this one to quit. A request that came
+    /// before anyone subscribed is raised to the first subscriber, on the subscribing thread.</summary>
+    public event EventHandler? QuitRequested
+    {
+        add => Subscribe(ref quitRequested, ref quitPending, value);
+        remove
+        {
+            lock (gate)
+            {
+                quitRequested -= value;
+            }
+        }
+    }
 
     /// <summary>Becomes the running instance, or returns null when another Pounce already is.</summary>
     /// <remarks>If the kernel objects cannot be made at all, this launch runs rather than nothing running.</remarks>
@@ -132,7 +159,7 @@ public sealed class SingleInstance : IDisposable
             {
                 return true;
             }
-            // Opened before asking, so its handle is held even if it exits at once.
+            // Looked up before asking; should it exit before WaitForExit opens its handle, that counts as exited.
             using Process? running = OpenProcess(id);
             if (id is not null && running is null)
             {
@@ -199,25 +226,57 @@ public sealed class SingleInstance : IDisposable
             {
                 return;
             }
-            EventHandler? handler = signalled switch
+            if (signalled is not (1 or 2))
             {
-                1 => ShowRequested,
-                2 => QuitRequested,
-                _ => null,
-            };
-            if (handler is null)
-            {
-                return;
+                return; // stop: disposing
             }
             Log.Info(signalled == 1 ? "Another launch asked for the panel" : "Asked to quit by Pounce.exe --quit");
-            try
+            EventHandler? handler;
+            lock (gate)
             {
-                handler(this, EventArgs.Empty);
+                // During start-up App has not subscribed yet: keep the request for its first subscriber.
+                if (signalled == 1)
+                {
+                    handler = showRequested;
+                    showPending |= handler is null;
+                }
+                else
+                {
+                    handler = quitRequested;
+                    quitPending |= handler is null;
+                }
             }
-            catch (Exception e)
+            Raise(handler);
+        }
+    }
+
+    private void Subscribe(ref EventHandler? handlers, ref bool pending, EventHandler? value)
+    {
+        bool deliver;
+        lock (gate)
+        {
+            handlers += value;
+            deliver = pending && value is not null;
+            if (deliver)
             {
-                Log.Warn("Handling another launch's request failed", e);
+                pending = false;
             }
+        }
+        if (deliver)
+        {
+            Raise(value);
+        }
+    }
+
+    private void Raise(EventHandler? handler)
+    {
+        try
+        {
+            handler?.Invoke(this, EventArgs.Empty);
+        }
+        catch (Exception e)
+        {
+            Log.Warn("Handling another launch's request failed", e);
         }
     }
 
