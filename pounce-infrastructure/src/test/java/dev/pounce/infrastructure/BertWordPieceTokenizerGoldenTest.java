@@ -90,6 +90,28 @@ class BertWordPieceTokenizerGoldenTest {
         assertSameAsReference(TokenizerCorpus.codePointSweep(0, Character.MAX_CODE_POINT + 1, 48));
     }
 
+    @Test
+    void embeddings_are_the_same_as_with_the_reference_tokenizer() {
+        assumeTrue(Files.exists(modelDir.resolve("model.onnx")), "model missing: run scripts/fetch-model.sh");
+        List<String> texts = List.of(
+                TokenizerCorpus.QUERY_PREFIX + "how do I renew my TLS certificate",
+                "Steps to rotate an expiring SSL cert on the load balancer before it lapses.",
+                "Crème brûlée, naïve café — ÜBER 中文 😀 C:\\Users\\me\\file.md [SEP] end",
+                "the canary rollout shifted traffic to the new version ".repeat(200),
+                "");
+        try (var embedder = OnnxEmbedder.load(modelDir)) {
+            for (String text : texts) {
+                var expected = reference.encode(text);
+                float[] before = embedder.embed(new BertWordPieceTokenizer.Encoding(
+                        expected.getIds(), expected.getTypeIds(), expected.getAttentionMask()));
+
+                float[] after = embedder.embedPassages(List.of(text)).getFirst();
+
+                assertThat(after).as(text).containsExactly(before);
+            }
+        }
+    }
+
     /**
      * The fixture {@link BertWordPieceTokenizerTest} checks without the reference must hold the reference's ids.
      * To write it again (after changing the cases): {@code mvn test -pl pounce-infrastructure

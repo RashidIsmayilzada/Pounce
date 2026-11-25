@@ -12,9 +12,10 @@
     <dependency><groupId>org.apache.lucene</groupId><artifactId>lucene-highlighter</artifactId></dependency>
     <dependency><groupId>org.apache.lucene</groupId><artifactId>lucene-analysis-common</artifactId></dependency>
     <dependency><groupId>com.microsoft.onnxruntime</groupId><artifactId>onnxruntime</artifactId></dependency>
-    <dependency><groupId>ai.djl.huggingface</groupId><artifactId>tokenizers</artifactId></dependency>
     <dependency><groupId>io.methvin</groupId><artifactId>directory-watcher</artifactId><version>0.19.1</version></dependency>
     <dependency><groupId>org.apache.pdfbox</groupId><artifactId>pdfbox</artifactId><version>3.0.8</version></dependency>
+    <!-- Test only: the reference the pure-Java tokenizer is checked against (BertWordPieceTokenizerGoldenTest). -->
+    <dependency><groupId>ai.djl.huggingface</groupId><artifactId>tokenizers</artifactId><scope>test</scope></dependency>
   </dependencies>
   <build>
     <plugins>
