@@ -23,6 +23,9 @@ namespace Pounce.Launcher;
 /// </remarks>
 public partial class App : Application
 {
+    /// <summary>Set (to anything) to make the startup fail at its very end: how to see the failure path work.</summary>
+    private const string FailStartupVariable = "POUNCE_TEST_FAIL_STARTUP";
+
     private SingleInstance? instance;
     private EngineSupervisor? supervisor;
     private HttpEngineClient? engine;
@@ -92,6 +95,11 @@ public partial class App : Application
 
         instance.ShowRequested += (_, _) => Dispatcher.BeginInvoke(new Action(window.ShowPanel));
         instance.QuitRequested += (_, _) => Dispatcher.BeginInvoke(new Action(Shutdown));
+        if (Environment.GetEnvironmentVariable(FailStartupVariable) is { Length: > 0 })
+        {
+            // For the manual test plan: a failure once the Engine, tray icon, hotkey and mutex all exist.
+            throw new InvalidOperationException($"{FailStartupVariable} is set, so this start fails on purpose.");
+        }
         // The first listing, ready before the first show; shows list again at most every 30 seconds.
         window.ReloadApps();
     }
