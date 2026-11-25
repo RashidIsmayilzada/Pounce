@@ -49,10 +49,8 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 
 /**
  * The Index as one Lucene index. Each Document is a block: one child per Passage (text + int8-quantized vector),
@@ -181,12 +179,12 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
     }
 
     @Override
-    public Set<Path> documents() {
+    public List<Path> documents() {
         return withSearcher(searcher -> {
             TopDocs all = searcher.search(new TermQuery(new Term(KIND, "document")),
                     Math.max(1, searcher.getIndexReader().maxDoc()));
             var stored = searcher.storedFields();
-            Set<Path> paths = new HashSet<>();
+            List<Path> paths = new ArrayList<>();
             for (ScoreDoc hit : all.scoreDocs) {
                 paths.add(Path.of(stored.document(hit.doc).get(PATH)));
             }

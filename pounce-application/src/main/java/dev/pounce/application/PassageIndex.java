@@ -6,7 +6,6 @@ import dev.pounce.domain.Result;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 
 /**
  * Port: the on-disk Index. Every lookup returns at most one Result per Document, best first.
@@ -24,8 +23,11 @@ public interface PassageIndex {
 
     void remove(Path document);
 
-    /** Paths of every Document currently in the Index. */
-    Set<Path> documents();
+    /**
+     * Paths of every Document currently in the Index, each once. A list, not a set of paths: on Windows two paths
+     * that differ only in letter case are equal, but they are different keys in the Index.
+     */
+    List<Path> documents();
 
     /** Keyword Matches on Passage text and file name; the last word of the Query also matches as a prefix. */
     List<Result> keyword(Query query);

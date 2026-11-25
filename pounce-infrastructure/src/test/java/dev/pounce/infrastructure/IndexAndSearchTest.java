@@ -189,6 +189,30 @@ class IndexAndSearchTest {
                 .containsExactly(folder.resolve("notes.md"));
     }
 
+    /** On a case-insensitive disk (Windows, macOS) the old name still "exists" after the rename. */
+    @Test
+    void a_rename_that_only_changes_case_leaves_one_document() throws IOException {
+        write("Notes.md", "The canary rollout went fine.");
+        engine.indexer().reconcile();
+
+        Files.move(folder.resolve("Notes.md"), folder.resolve("notes.md"));
+        engine.indexer().refresh(folder.resolve("Notes.md"));
+        engine.indexer().refresh(folder.resolve("notes.md"));
+
+        assertThat(fileNamesFound("canary")).containsExactly("notes.md");
+    }
+
+    @Test
+    void a_rename_that_only_changes_case_while_pounce_was_not_running_leaves_one_document() throws IOException {
+        write("Notes.md", "The canary rollout went fine.");
+        engine.indexer().reconcile();
+
+        Files.move(folder.resolve("Notes.md"), folder.resolve("notes.md"));
+        engine.indexer().reconcile();
+
+        assertThat(fileNamesFound("canary")).containsExactly("notes.md");
+    }
+
     @Test
     void a_document_without_readable_text_is_still_found_by_its_name() throws IOException {
         Files.write(folder.resolve("scanned-passport.pdf"), new byte[]{(byte) 0xFF, (byte) 0xFE, 0, 1, 2});
@@ -314,6 +338,13 @@ class IndexAndSearchTest {
 
         assertThat(engine.searcher().search(Query.of("passport"), Phase.EARLY).getFirst().snippet())
                 .isEqualTo(Snippet.NONE);
+    }
+
+    /** Compared as text: on Windows two paths that differ only in case are equal. */
+    private List<String> fileNamesFound(String query) {
+        return engine.searcher().search(Query.of(query), Phase.FINAL).stream()
+                .map(result -> result.path().getFileName().toString())
+                .toList();
     }
 
     private static List<String> highlighted(Snippet snippet) {

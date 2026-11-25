@@ -47,7 +47,8 @@ public final class Indexer {
      * a file or folder that cannot be read, is logged and skipped; the rest is still indexed.
      */
     public void reconcile() {
-        Set<Path> onDisk = new HashSet<>();
+        // Keys are compared as text: on Windows, paths that differ only in letter case are equal.
+        Set<String> onDisk = new HashSet<>();
         List<Path> unreadable = new ArrayList<>();
         for (WatchedFolder folder : folders) {
             Optional<Path> root = existingRoot(folder);
@@ -56,7 +57,7 @@ public final class Indexer {
             }
             walk(root.get(), root.get(), file -> {
                 try {
-                    onDisk.add(file.toRealPath());
+                    onDisk.add(file.toRealPath().toString());
                     refreshFile(root.get(), file);
                 } catch (IOException | RuntimeException e) {
                     LOG.log(System.Logger.Level.WARNING, "Could not index {0}: {1}", file, e.toString());
@@ -66,9 +67,22 @@ public final class Indexer {
         for (Path document : index.documents()) {
             // Re-check the disk: the file may have been created (and indexed by a live refresh) after the walk.
             // Documents in a folder that could not be read this time are kept: the folder is still there.
-            if (!onDisk.contains(document) && !isInside(document, unreadable) && !Files.exists(document)) {
+            if (!onDisk.contains(document.toString()) && !isInside(document, unreadable)
+                    && !isStoredUnderItsRealPath(document)) {
                 index.remove(document);
             }
+        }
+    }
+
+    /**
+     * False when the file is gone, and when it is now reached under another spelling: on a case-insensitive disk
+     * (Windows, macOS) a rename that only changed letter case leaves the old path "existing".
+     */
+    private static boolean isStoredUnderItsRealPath(Path document) {
+        try {
+            return document.toRealPath().toString().equals(document.toString());
+        } catch (IOException gone) {
+            return false;
         }
     }
 
@@ -96,12 +110,20 @@ public final class Indexer {
      */
     public synchronized void refresh(Path path) {
         try {
+            Path lastKnown = lastKnownLocation(path);
             if (!Files.exists(path)) {
-                forget(lastKnownLocation(path));
-            } else if (Files.isDirectory(path)) {
-                Path folder = path.toRealPath();
-                Path watchedFolder = watchedFolderOf(folder);
-                walk(watchedFolder, folder, file -> {
+                forget(lastKnown);
+                return;
+            }
+            Path real = path.toRealPath();
+            if (!real.toString().equals(lastKnown.toString())) {
+                // The same file under another spelling: on a case-insensitive disk (Windows, macOS) a rename that only
+                // changed letter case reports the old name, which still "exists". Forget what was stored under it.
+                forget(lastKnown);
+            }
+            if (Files.isDirectory(real)) {
+                Path watchedFolder = watchedFolderOf(real);
+                walk(watchedFolder, real, file -> {
                     try {
                         refreshFile(watchedFolder, file);
                     } catch (RuntimeException e) {
@@ -109,7 +131,7 @@ public final class Indexer {
                     }
                 }, unreadable -> { });
             } else {
-                refreshFile(watchedFolderOf(path.toRealPath()), path);
+                refreshFile(watchedFolderOf(real), real);
             }
         } catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -158,10 +180,14 @@ public final class Indexer {
         }
     }
 
+    /** Removes the Document stored under exactly this path, and every Document stored beneath it. */
     private void forget(Path gone) {
-        index.remove(gone);
+        String key = gone.toString();
+        String separator = gone.getFileSystem().getSeparator();
+        String beneath = key.endsWith(separator) ? key : key + separator;
         for (Path document : index.documents()) {
-            if (document.startsWith(gone)) {
+            String stored = document.toString();
+            if (stored.equals(key) || stored.startsWith(beneath)) {
                 index.remove(document);
             }
         }
