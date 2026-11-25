@@ -26,7 +26,8 @@ public interface PassageIndex {
 
     /**
      * Paths of every Document currently in the Index, each once. A list, not a set of paths: on Windows two paths
-     * that differ only in letter case are equal, but they are different keys in the Index.
+     * that differ only in letter case are equal, but they are different keys in the Index. A Document whose stored
+     * path cannot be read on this system is left out of this list and of every lookup, and removed.
      */
     List<Path> documents();
 

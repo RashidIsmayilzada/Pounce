@@ -48,12 +48,15 @@ import org.apache.lucene.store.FSDirectory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -110,6 +113,7 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
     private final BitSetProducer parents = new QueryBitSetProducer(new TermQuery(new Term(KIND, "document")));
     private final Executor committer;
     private final AtomicBoolean commitScheduled = new AtomicBoolean();
+    private final Set<String> unusablePaths = ConcurrentHashMap.newKeySet();
 
     private LucenePassageIndex(Directory directory, Executor committer) {
         this.committer = committer;
@@ -215,16 +219,22 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
 
     @Override
     public List<Path> documents() {
-        return withSearcher(searcher -> {
+        List<String> keys = withSearcher(searcher -> {
             TopDocs all = searcher.search(new TermQuery(new Term(KIND, "document")),
                     Math.max(1, searcher.getIndexReader().maxDoc()));
             var stored = searcher.storedFields();
-            List<Path> paths = new ArrayList<>();
+            List<String> found = new ArrayList<>();
             for (ScoreDoc hit : all.scoreDocs) {
-                paths.add(Path.of(stored.document(hit.doc).get(PATH)));
+                found.add(stored.document(hit.doc).get(PATH));
             }
-            return paths;
+            return found;
         });
+        List<Path> paths = new ArrayList<>();
+        for (String key : keys) {
+            // A Document no path here can name cannot be checked against the disk, so it is removed right away.
+            pathOf(key).ifPresentOrElse(paths::add, () -> write(() -> writer.deleteDocuments(new Term(PATH, key))));
+        }
+        return paths;
     }
 
     @Override
@@ -318,8 +328,11 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
         var stored = searcher.storedFields();
         List<Result> results = new ArrayList<>();
         for (ScoreDoc hit : top.scoreDocs) {
-            String path = stored.document(hit.doc).get(PATH);
-            results.add(new Result(Path.of(path), snippets.of(searcher, path, textQuery)));
+            String key = stored.document(hit.doc).get(PATH);
+            Optional<Path> path = pathOf(key);
+            if (path.isPresent()) {
+                results.add(new Result(path.get(), snippets.of(searcher, key, textQuery)));
+            }
         }
         return results;
     }
@@ -337,6 +350,22 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
             throw new UncheckedIOException(e);
         }
         return words;
+    }
+
+    /**
+     * The path stored under this key, if this system can read it: one stored by another system, or by a version
+     * that indexed names Windows cannot open (a name ending in a space), is not a path here. Logged once per key.
+     */
+    private Optional<Path> pathOf(String key) {
+        try {
+            return Optional.of(Path.of(key));
+        } catch (InvalidPathException e) {
+            if (unusablePaths.add(key)) {
+                LOG.log(System.Logger.Level.WARNING, "Forgetting a Document whose stored path cannot be used here: "
+                        + e.getMessage());
+            }
+            return Optional.empty();
+        }
     }
 
     private static String fileNameWords(Path document) {

@@ -11,6 +11,7 @@ import java.io.UncheckedIOException;
 import java.nio.file.FileSystems;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
@@ -204,6 +205,10 @@ public final class Indexer {
     private synchronized void refreshFile(Path watchedFolder, Path path) {
         try {
             Path file = path.toRealPath();
+            if (!canBeNamedAgain(file)) {
+                LOG.log(System.Logger.Level.INFO, "Skipped {0}: its name cannot be used to open it again", file);
+                return;
+            }
             FileStamp stamp = new FileStamp(Files.size(file), Files.getLastModifiedTime(file).toMillis());
             if (exclusions.excludes(watchedFolder, file, stamp.size())) {
                 if (index.stamp(file).isPresent()) {
@@ -274,6 +279,19 @@ public final class Indexer {
         try {
             return Exclusions.isCloudOnlyOrSystem((Integer) Files.getAttribute(file, "dos:attributes"));
         } catch (IOException | RuntimeException unknown) {
+            return false;
+        }
+    }
+
+    /**
+     * Whether the path, stored as text, reads back as this file. On Windows a name ending in a space (which other
+     * tools, WSL among them, can create) is listed by the disk but rejected when parsed, so storing it would make
+     * the Document impossible to open, check or remove.
+     */
+    private static boolean canBeNamedAgain(Path file) {
+        try {
+            return file.getFileSystem().getPath(file.toString()).equals(file);
+        } catch (InvalidPathException e) {
             return false;
         }
     }

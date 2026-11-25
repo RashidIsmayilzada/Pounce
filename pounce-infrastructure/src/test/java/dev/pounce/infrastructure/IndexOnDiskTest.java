@@ -1,6 +1,16 @@
 package dev.pounce.infrastructure;
 
+import dev.pounce.application.Phase;
+import dev.pounce.domain.Query;
+import dev.pounce.domain.Result;
+import org.apache.lucene.analysis.en.EnglishAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.document.StringField;
+import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.DirectoryReader;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.SegmentInfos;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.search.IndexSearcher;
@@ -93,6 +103,35 @@ class IndexOnDiskTest {
         engine.indexer().refresh(folder.resolve("notes.md"));
 
         assertThat(eventuallyOnDisk(1)).isTrue();
+    }
+
+    @Test
+    void a_stored_path_this_system_cannot_read_is_skipped_and_then_forgotten() throws IOException {
+        write("notes.md", "The canary rollout went fine.");
+        // As if stored by another system or an older version: no file name here can contain a NUL character.
+        storeDocumentWithRawPath(folder + "/canary\0notes.md");
+        index = LucenePassageIndex.open(indexFolder);
+        var engine = engineOver(index);
+
+        assertThat(engine.searcher().search(Query.of("canary"), Phase.EARLY)).isEmpty();
+        engine.indexer().reconcile();
+
+        assertThat(engine.searcher().search(Query.of("canary"), Phase.EARLY))
+                .extracting(Result::path)
+                .containsExactly(folder.resolve("notes.md"));
+        assertThat(documentsOnDisk()).isEqualTo(1);
+    }
+
+    /** A Document entry the way the Index stores one, found by the words of its file name. */
+    private void storeDocumentWithRawPath(String path) throws IOException {
+        try (var directory = FSDirectory.open(indexFolder);
+             var writer = new IndexWriter(directory, new IndexWriterConfig(new EnglishAnalyzer()))) {
+            var document = new Document();
+            document.add(new StringField("kind", "document", Field.Store.NO));
+            document.add(new StringField("path", path, Field.Store.YES));
+            document.add(new TextField("name", "canary notes", Field.Store.NO));
+            writer.addDocument(document);
+        }
     }
 
     private static void runAll(List<Runnable> tasks) {
