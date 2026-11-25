@@ -104,11 +104,21 @@ class ExclusionsTest {
     }
 
     @Test
-    void a_watched_folder_chosen_inside_appdata_or_library_is_indexed_but_the_home_folder_skips_them() {
-        assertThat(excludes(HOME.resolve("Library/Mobile Documents"), "Library/Mobile Documents/notes.md")).isFalse();
-        assertThat(excludes(HOME, "Library/Mobile Documents/notes.md")).isTrue();
+    void a_watched_folder_chosen_inside_appdata_or_snap_is_indexed_but_the_home_folder_skips_them() {
         assertThat(excludes(HOME.resolve("AppData/Roaming/Notes"), "AppData/Roaming/Notes/notes.md")).isFalse();
         assertThat(excludes(HOME, "AppData/Roaming/Notes/notes.md")).isTrue();
+        assertThat(excludes(HOME.resolve("snap/notes/common"), "snap/notes/common/notes.md")).isFalse();
+        assertThat(excludes(HOME, "snap/notes/common/notes.md")).isTrue();
+    }
+
+    /** iCloud Drive lives in ~/Library/Mobile Documents: reading its files would download every one of them. */
+    @Test
+    void library_is_skipped_even_for_a_watched_folder_chosen_inside_it() {
+        Path iCloudDrive = HOME.resolve("Library/Mobile Documents");
+
+        assertThat(excludes(iCloudDrive, "Library/Mobile Documents/notes.md")).isTrue();
+        assertThat(defaults.excludesFolder(iCloudDrive, iCloudDrive)).isTrue();
+        assertThat(excludes(HOME, "Library/Mobile Documents/notes.md")).isTrue();
     }
 
     @Test

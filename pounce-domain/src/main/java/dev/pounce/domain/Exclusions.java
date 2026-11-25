@@ -15,13 +15,15 @@ import java.util.Set;
  *       folders ({@code $Recycle.Bin}, {@code System Volume Information}, {@code $WinREAgent}, {@code $SysReset},
  *       {@code $Windows.~BT}, {@code $Windows.~WS}; other folders starting with {@code $} are the user's), and the
  *       files {@code desktop.ini}, {@code Thumbs.db} and Office lock files ({@code ~$report.docx}). The Watched
- *       Folder's own path is never
- *       judged by name, so a Watched Folder inside a hidden folder or under {@code AppData\Local\Temp} is indexed.</li>
- *   <li><b>Location rules</b> skip the places where programs keep their own files: {@code ~/Library},
- *       {@code ~/AppData} and {@code ~/snap}. They apply when the walk reaches such a place from a Watched Folder
- *       above it (for example the whole home folder); a Watched Folder chosen inside one of them is indexed.</li>
- *   <li><b>The Pounce home</b> (where the Index itself lives) is always skipped, even when the Watched Folder is
- *       inside it: indexing the Index would feed its own writes back into it.</li>
+ *       Folder's own path is never judged by name, so a Watched Folder inside a hidden folder or under
+ *       {@code AppData\Local\Temp} is indexed.</li>
+ *   <li><b>Location rules</b> skip the places where programs keep their own files: {@code ~/AppData} and
+ *       {@code ~/snap}. They apply when the walk reaches such a place from a Watched Folder above it (for example
+ *       the whole home folder); a Watched Folder chosen inside one of them is indexed.</li>
+ *   <li><b>Always skipped</b>, even when the Watched Folder is inside: {@code ~/Library}, since on macOS it holds
+ *       iCloud Drive ({@code ~/Library/Mobile Documents}), whose files would all be downloaded by reading them; and
+ *       the Pounce home (where the Index itself lives), since indexing the Index would feed its own writes back
+ *       into it.</li>
  *   <li><b>Size:</b> files over 50 MB.</li>
  *   <li><b>Windows file attributes</b> ({@link #isCloudOnlyOrSystem}): files that are only in the cloud, and system
  *       files.</li>
@@ -43,11 +45,11 @@ public final class Exclusions {
             "$recycle.bin", "system volume information", "$winreagent", "$sysreset", "$windows.~bt", "$windows.~ws");
 
     private final List<Path> programLocations;
-    private final Path pounceHome;
+    private final List<Path> alwaysSkipped;
 
-    private Exclusions(List<Path> programLocations, Path pounceHome) {
+    private Exclusions(List<Path> programLocations, List<Path> alwaysSkipped) {
         this.programLocations = programLocations;
-        this.pounceHome = pounceHome;
+        this.alwaysSkipped = alwaysSkipped;
     }
 
     /**
@@ -57,7 +59,7 @@ public final class Exclusions {
     public static Exclusions defaults(Path userHome, Path pounceHome) {
         Path home = real(userHome);
         return new Exclusions(
-                List.of(home.resolve("Library"), home.resolve("AppData"), home.resolve("snap")), real(pounceHome));
+                List.of(home.resolve("AppData"), home.resolve("snap")), List.of(home.resolve("Library"), real(pounceHome)));
     }
 
     /** Whether this file, reached through this Watched Folder, stays out of the Index. */
@@ -74,8 +76,10 @@ public final class Exclusions {
      * Lets a walk skip a whole subtree without looking inside.
      */
     public boolean excludesFolder(Path watchedFolder, Path folder) {
-        if (folder.startsWith(pounceHome)) {
-            return true;
+        for (Path location : alwaysSkipped) {
+            if (folder.startsWith(location)) {
+                return true;
+            }
         }
         for (Path location : programLocations) {
             if (folder.startsWith(location) && !watchedFolder.startsWith(location)) {
