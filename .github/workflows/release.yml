@@ -12,7 +12,9 @@ name: Release
 
 on:
   push:
-    tags: ['v*']
+    # Not pre-release tags such as v0.2.0-rc.1: a release candidate is published by hand, as a pre-release,
+    # and must not reach Homebrew.
+    tags: ['v*', '!v*-*']
   workflow_dispatch:
     inputs:
       version:
