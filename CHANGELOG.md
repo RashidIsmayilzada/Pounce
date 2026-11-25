@@ -52,7 +52,7 @@ Pounce for Windows.
 - Windows: in `pounce.yml`, write paths in single quotes or with forward slashes; a double-quoted path with backslashes is a YAML error that stops the search engine.
 - Windows: Windows 11 on x64 only. On Windows 11 21H2 the panel has a plain background instead of the acrylic one.
 - Windows: no counterpart to Quick Look, and the shortcut can only be changed through `POUNCE_HOTKEY`.
-- Speed and memory have only been measured on a Mac.
+- Windows: on a PC used by several signed-in users at once, only the first user's Pounce works, because the search engine's port (7431) is shared by the whole machine.- Speed and memory have only been measured on a Mac.
 
 ## [0.1.0] - 2026-11-24
 

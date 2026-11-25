@@ -57,7 +57,7 @@ Requires macOS 14 or later on Apple Silicon.
 
 Windows support is new. Please [report](https://github.com/RashidIsmayilzada/Pounce/issues/new/choose) anything that doesn't work.
 
-1. Download `Pounce-<version>-windows-x64.zip` from [Releases](https://github.com/RashidIsmayilzada/Pounce/releases) and unzip it to a folder on your own disk, for example your user folder. It holds a `Pounce` folder.
+1. Download `Pounce-<version>-windows-x64.zip` from [Releases](https://github.com/RashidIsmayilzada/Pounce/releases) and unzip it to a folder on your own disk, for example your user folder. It holds a `Pounce` folder. Pick a folder whose path has only plain Latin letters, such as `C:\Apps`: the Java runtime inside Pounce can't start from a folder with letters outside your system's ANSI code page. Your user name may have any letters.
 2. Run `Pounce.exe` in that folder. Pounce is not code-signed yet, so the first time Windows SmartScreen says "Windows protected your PC": click **More info** → **Run anyway**.
 3. Pounce puts its icon in the notification area of the taskbar and starts indexing. Press **Alt+Space** to search.
 
