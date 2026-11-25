@@ -3,8 +3,11 @@
 #   - push a tag:        git tag v0.2.0 && git push origin v0.2.0
 #   - or from GitHub:    Actions → Release → Run workflow → enter 0.2.0 (creates the tag on the chosen branch)
 # The release notes are that version's section of CHANGELOG.md, which must exist.
-# The macOS and Windows builds run side by side and hand their zips over as workflow artifacts; the release is
-# published only when both built and passed their smoke checks.
+# The macOS and Windows builds run side by side and hand their zips over as workflow artifacts. The release is created
+# from the macOS build alone (and the Homebrew cask follows it), so the macOS release never waits for Windows; the
+# Windows zip is attached to it afterwards, only once the Windows build passed its smoke check. When the Windows build
+# fails, the release is a normal macOS release and the windows job is red; fix the cause and use "Re-run failed jobs",
+# which builds Windows again and attaches its zip to the existing release.
 name: Release
 
 on:
@@ -113,6 +116,7 @@ jobs:
           compression-level: 0
           retention-days: 7
           if-no-files-found: error
+          overwrite: true   # a re-run replaces the zip of the attempt before
 
   windows:
     needs: prepare
@@ -170,44 +174,41 @@ jobs:
           compression-level: 0
           retention-days: 7
           if-no-files-found: error
+          overwrite: true   # a re-run replaces the zip of the attempt before
 
+  # The release itself: the macOS build only, as before Windows existed. Needs nothing from the windows job.
   publish:
-    needs: [prepare, macos, windows]
+    needs: [prepare, macos]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
-
       - uses: actions/download-artifact@v4
         with:
           name: release-notes
 
       - uses: actions/download-artifact@v4
         with:
-          pattern: build-*
+          name: build-macos
           path: dist
-          merge-multiple: true
 
-      - name: Check the downloaded zips
+      - name: Check the downloaded zip
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
         working-directory: dist
         run: |
           ls -l
-          for zip in "Pounce-$VERSION-macos-arm64.zip" "Pounce-$VERSION-windows-x64.zip"; do
-            sha256sum -c "$zip.sha256"
-          done
+          sha256sum -c "Pounce-$VERSION-macos-arm64.zip.sha256"
 
       - name: Publish the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           gh release create "v$VERSION" \
             "dist/Pounce-$VERSION-macos-arm64.zip" "dist/Pounce-$VERSION-macos-arm64.zip.sha256" \
-            "dist/Pounce-$VERSION-windows-x64.zip" "dist/Pounce-$VERSION-windows-x64.zip.sha256" \
             --title "Pounce $VERSION" --notes-file notes.md --target "$GITHUB_SHA"
 
   homebrew:
@@ -216,3 +217,34 @@ jobs:
     with:
       version: ${{ needs.prepare.outputs.version }}
     secrets: inherit
+
+  # Runs only when the release exists and the Windows build passed its smoke check (a skipped or failed need skips it).
+  # --clobber: a re-run replaces what an earlier attempt attached.
+  attach-windows:
+    needs: [prepare, publish, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-windows
+          path: dist
+
+      - name: Check the downloaded zip
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        working-directory: dist
+        run: |
+          ls -l
+          sha256sum -c "Pounce-$VERSION-windows-x64.zip.sha256"
+
+      - name: Attach the Windows zip to the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          gh release upload "v$VERSION" --clobber \
+            "dist/Pounce-$VERSION-windows-x64.zip" "dist/Pounce-$VERSION-windows-x64.zip.sha256"
