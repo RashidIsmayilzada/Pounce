@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Builds Pounce for Windows x64: the Launcher (Pounce.exe) with the Engine, a trimmed Java 25 runtime and the model.
 #   scripts/build-windows.sh        build (reuses the Java runtime if the module list and JDK version are unchanged)
-# Output: build/Pounce-windows-x64/Pounce/ and build/Pounce-<version>-windows-x64.zip with its .sha256.
+# Output: build/Pounce-windows-x64/Pounce/ and build/Pounce-<version>-windows-x64.zip with its .sha256. The Pounce folder
+# holds Pounce.exe with the .NET files, runtime/ (the Java runtime), engine/pounce-engine.jar, models/ and
+# native/onnxruntime/ (ONNX Runtime's DLLs, which the Launcher points the Engine at with -Donnxruntime.native.path,
+# so that ONNX Runtime doesn't unpack them into %TEMP% on every start).
 # Runs on Windows under Git Bash (as CI does), and on Linux, WSL or macOS by cross-building.
 # Needs: JDK 25 (JAVA_HOME_25, or JAVA_HOME), Maven, the .NET 10 SDK, curl; and unzip when cross-building.
 # Cross-building: jlink can only link the modules of a JDK with its own version, so the jmods of the Temurin
@@ -81,6 +84,30 @@ shopt -u nullglob
 [ ${#jars[@]} -eq 1 ] || fail "expected one pounce-api/target/pounce-api-*.jar after the Maven build, found ${#jars[@]}"
 ENGINE_JAR="${jars[0]}"
 
+# ONNX Runtime's Windows DLLs, from the onnxruntime jar inside the Engine jar, so they always match the Java classes
+# that load them. Without -Donnxruntime.native.path ONNX Runtime unpacks them from that jar into a new %TEMP% folder
+# on every start; a loaded DLL can't be deleted, so about 20 MB would stay behind each time, and policies that forbid
+# loading DLLs from %TEMP% would stop the Engine. With it, it loads onnxruntime.dll and onnxruntime4j_jni.dll from that
+# folder (and fails if either is missing there) and uses onnxruntime_providers_shared.dll from it too (unpacking only
+# that one into %TEMP% if it is missing). The JDK's jar tool, rather than unzip, so this works the same under Git Bash.
+step "Taking ONNX Runtime's Windows DLLs from the Engine jar"
+NATIVES="$OUT/onnxruntime-win-x64"
+ORT_DLLS=(onnxruntime.dll onnxruntime4j_jni.dll onnxruntime_providers_shared.dll)
+rm -rf "$NATIVES" "$NATIVES.tmp"
+mkdir -p "$NATIVES.tmp"
+ort_jars=$("$JAVA_HOME/bin/jar" --list --file "$ENGINE_JAR" | tr -d '\r' | grep -E '^BOOT-INF/lib/onnxruntime-[0-9][^/]*\.jar$' || true)
+[ "$(printf '%s' "$ort_jars" | grep -c .)" -eq 1 ] \
+  || fail "expected one BOOT-INF/lib/onnxruntime-<version>.jar in $ENGINE_JAR, found: ${ort_jars:-none}"
+(cd "$NATIVES.tmp" && "$JAVA_HOME/bin/jar" --extract --file "$ENGINE_JAR" "$ort_jars" \
+  && "$JAVA_HOME/bin/jar" --extract --file "$ort_jars" ai/onnxruntime/native/win-x64/)
+for dll in "${ORT_DLLS[@]}"; do
+  [ -f "$NATIVES.tmp/ai/onnxruntime/native/win-x64/$dll" ] \
+    || fail "${ort_jars#BOOT-INF/lib/} has no ai/onnxruntime/native/win-x64/$dll; has its layout changed?"
+done
+mv "$NATIVES.tmp/ai/onnxruntime/native/win-x64" "$NATIVES"
+rm -rf "$NATIVES.tmp"
+echo "${ort_jars#BOOT-INF/lib/}: $(cd "$NATIVES" && echo *)"
+
 step "Building the Launcher"
 rm -rf "$STAGE"
 mkdir -p "$DEST"
@@ -104,10 +131,11 @@ if [ ! -f "$RUNTIME/bin/java.exe" ]; then
 fi
 
 step "Assembling Pounce for Windows"
-mkdir -p "$DEST/engine" "$DEST/models"
+mkdir -p "$DEST/engine" "$DEST/models" "$DEST/native"
 cp -R "$RUNTIME" "$DEST/runtime"
 cp "$ENGINE_JAR" "$DEST/engine/pounce-engine.jar"
 cp -R "$MODEL" "$DEST/models/"
+cp -R "$NATIVES" "$DEST/native/onnxruntime"
 
 step "Zipping"
 ZIP="Pounce-$VERSION-windows-x64.zip"
@@ -119,7 +147,7 @@ rm -f "$OUT/$ZIP" "$OUT/$ZIP.sha256"
 
 step "Done"
 launcher_kb=$(du -sk "$DEST" | cut -f1)
-for part in runtime engine models; do launcher_kb=$((launcher_kb - $(du -sk "$DEST/$part" | cut -f1))); done
+for part in runtime engine models native; do launcher_kb=$((launcher_kb - $(du -sk "$DEST/$part" | cut -f1))); done
 printf '%s\tPounce-windows-x64/Pounce/ (.NET Launcher: %s MB)\n' "$(du -sh "$DEST" | cut -f1)" "$((launcher_kb / 1024))"
-du -sh "$DEST"/runtime "$DEST"/engine "$DEST"/models "$OUT/$ZIP" | sed "s#$OUT/##"
+du -sh "$DEST"/runtime "$DEST"/engine "$DEST"/models "$DEST"/native/onnxruntime "$OUT/$ZIP" | sed "s#$OUT/##"
 cat "$OUT/$ZIP.sha256"

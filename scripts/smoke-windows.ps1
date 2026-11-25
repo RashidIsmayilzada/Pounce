@@ -1,5 +1,6 @@
 # Smoke-checks build\Pounce-windows-x64\Pounce\Pounce.exe on a temporary home and Watched Folder (never your real folders):
-#   1. Pounce.exe starts its bundled Engine, which indexes the folder and answers a search through the API;
+#   1. Pounce.exe starts its bundled Engine, which indexes the folder and answers a search through the API, with
+#      ONNX Runtime's DLLs loaded from the bundle's native\onnxruntime rather than unpacked into the temp folder;
 #   2. closing Pounce (Pounce.exe --quit) also stops the Engine;
 #   3. force-killing Pounce still stops the Engine.
 # Build it first with scripts/build-windows.sh, then, in Windows PowerShell 5.1 or PowerShell 7:
@@ -112,6 +113,15 @@ function Wait-Gone([int]$Id, [int]$Seconds) {
     return $false
 }
 
+# The onnxruntime-java* folders in the temp folder Java uses (GetTempPath: %TMP%, else %TEMP%). ONNX Runtime makes one on
+# every start, even with -Donnxruntime.native.path; only without it does it unpack its DLLs (about 20 MB) into it, and
+# then they stay there, because a loaded DLL can't be deleted.
+$TempDir = [System.IO.Path]::GetTempPath()
+function Get-OrtTempFolders {
+    Get-ChildItem -LiteralPath $TempDir -Directory -Filter 'onnxruntime-java*' -ErrorAction SilentlyContinue |
+        ForEach-Object { $_.FullName }
+}
+
 $launchers = New-Object System.Collections.ArrayList
 function Start-Pounce {
     $process = Start-Process -FilePath $Exe -PassThru
@@ -139,6 +149,7 @@ try {
     $env:POUNCE_HOME = $HomeDir
 
     # 1. Starts the Engine, which indexes the folder and answers a search.
+    $ortBefore = @(Get-OrtTempFolders)
     $launcher = Start-Pounce
     $clock = [System.Diagnostics.Stopwatch]::StartNew()
     $found = $false
@@ -156,6 +167,15 @@ try {
     }
     Write-Host ('ok   bundled Engine answered a search {0:N0} s after launch' -f $clock.Elapsed.TotalSeconds)
 
+    # ONNX Runtime is loaded by now (the search embedded the query), so any DLLs it unpacked are there.
+    $ortNew = @(Get-OrtTempFolders | Where-Object { $ortBefore -notcontains $_ })
+    $unpacked = @($ortNew | ForEach-Object { Get-ChildItem -LiteralPath $_ -Recurse -Force -File -ErrorAction SilentlyContinue })
+    if ($unpacked.Count -gt 0) {
+        throw ('ONNX Runtime unpacked its DLLs into the temp folder instead of loading them from native\onnxruntime: ' +
+            (($unpacked | ForEach-Object { $_.FullName }) -join ', '))
+    }
+    Write-Host ('ok   ONNX Runtime unpacked nothing into {0} ({1} new onnxruntime-java folder(s), empty)' -f $TempDir, $ortNew.Count)
+
     $engine = Get-EnginePid $launcher.Id
     if (-not $engine) { throw 'no Engine child process found' }
     $workingSet = (Get-Process -Id $engine).WorkingSet64 / 1MB
@@ -168,6 +188,11 @@ try {
     if (-not $launcher.WaitForExit(15000)) { throw 'Pounce.exe still running 15 s after Pounce.exe --quit' }
     if (-not (Wait-Gone $engine 15)) { throw 'Engine still running 15 s after Pounce quit' }
     Write-Host 'ok   quitting Pounce stopped the Engine'
+    # An Engine that exits through System.exit removes its empty folder; one that is killed leaves it (0 bytes).
+    $ortLeft = @($ortNew | Where-Object { Test-Path -LiteralPath $_ })
+    if ($ortLeft.Count -gt 0) {
+        Write-Host ('note: {0} empty onnxruntime-java folder(s) left in {1}: the Engine did not exit cleanly' -f $ortLeft.Count, $TempDir)
+    }
 
     # 3. Force-killing Pounce still stops the Engine.
     $launcher = Start-Pounce

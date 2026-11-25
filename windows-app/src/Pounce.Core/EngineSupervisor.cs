@@ -5,21 +5,36 @@ namespace Pounce.Core;
 /// <param name="Jar">The Engine's jar.</param>
 /// <param name="ModelDir">The embedding model's folder.</param>
 /// <param name="Home">The data folder (see <see cref="PounceHome"/>).</param>
-public sealed record EngineLayout(string Java, string Jar, string ModelDir, string Home)
+/// <param name="OnnxRuntimeNatives">
+/// The folder holding ONNX Runtime's DLLs (<c>onnxruntime.dll</c>, <c>onnxruntime4j_jni.dll</c>,
+/// <c>onnxruntime_providers_shared.dll</c>), or null to let ONNX Runtime unpack them from its jar into <c>%TEMP%</c>
+/// as it does by default. Loading them from the install folder leaves no DLLs behind in <c>%TEMP%</c> (a loaded DLL
+/// can't be deleted, so each start would leave about 20 MB there) and works where policy forbids loading DLLs from it.
+/// </param>
+public sealed record EngineLayout(string Java, string Jar, string ModelDir, string Home, string? OnnxRuntimeNatives = null)
 {
     private static readonly IReadOnlyDictionary<string, string> NoVariables = new Dictionary<string, string>();
 
     /// <summary>
-    /// Next to <c>Pounce.exe</c>: <c>runtime\bin\java.exe</c>, <c>engine\pounce-engine.jar</c> and
-    /// <c>models\bge-small-en-v1.5</c> under <paramref name="appFolder"/>; data in <paramref name="home"/>.
+    /// Next to <c>Pounce.exe</c>: <c>runtime\bin\java.exe</c>, <c>engine\pounce-engine.jar</c>,
+    /// <c>models\bge-small-en-v1.5</c> and, when the build put them there, ONNX Runtime's DLLs in
+    /// <c>native\onnxruntime</c>, under <paramref name="appFolder"/>; data in <paramref name="home"/>.
     /// </summary>
     /// <param name="appFolder">The folder holding <c>Pounce.exe</c> (<c>AppContext.BaseDirectory</c>).</param>
     /// <param name="home">The data folder, usually <see cref="PounceHome.Folder"/>.</param>
-    public static EngineLayout Bundled(string appFolder, string home) => new(
-        WindowsPath.Join(appFolder, "runtime", "bin", "java.exe"),
-        WindowsPath.Join(appFolder, "engine", "pounce-engine.jar"),
-        WindowsPath.Join(appFolder, "models", "bge-small-en-v1.5"),
-        home);
+    public static EngineLayout Bundled(string appFolder, string home) => Bundled(appFolder, home, Directory.Exists);
+
+    /// <summary><see cref="Bundled(string, string)"/>, asking <paramref name="folderExists"/> instead of the disk.</summary>
+    internal static EngineLayout Bundled(string appFolder, string home, Func<string, bool> folderExists)
+    {
+        string natives = WindowsPath.Join(appFolder, "native", "onnxruntime");
+        return new(
+            WindowsPath.Join(appFolder, "runtime", "bin", "java.exe"),
+            WindowsPath.Join(appFolder, "engine", "pounce-engine.jar"),
+            WindowsPath.Join(appFolder, "models", "bge-small-en-v1.5"),
+            home,
+            folderExists(natives) ? natives : null);
+    }
 
     /// <summary>
     /// The JVM and Engine arguments, one string each (pass them through <c>ProcessStartInfo.ArgumentList</c>; nothing is
@@ -39,6 +54,9 @@ public sealed record EngineLayout(string Java, string Jar, string ModelDir, stri
         // Spring reads this as a URL, so the whole path takes forward slashes: optional:file:C:/Users/me/...
         "-Dspring.config.additional-location=optional:file:" + new PounceHome(Home).ConfigFile.Replace('\\', '/'),
         $"-Dpounce.parent-pid={parentProcessId}",
+        // A native path, unlike the URL above. ONNX Runtime then loads its DLLs from there instead of unpacking them into
+        // %TEMP% (and fails to start if onnxruntime.dll or onnxruntime4j_jni.dll is missing there).
+        .. (OnnxRuntimeNatives is null ? (string[])[] : [$"-Donnxruntime.native.path={OnnxRuntimeNatives}"]),
         "-jar", Jar,
         $"--pounce.home={Home}",
         $"--pounce.model-dir={ModelDir}",

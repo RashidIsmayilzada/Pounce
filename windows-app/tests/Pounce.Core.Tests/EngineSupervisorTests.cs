@@ -179,6 +179,40 @@ public class EngineLayoutTests
     }
 
     [Fact]
+    public void Onnx_runtime_loads_its_dlls_from_the_bundle_when_the_bundle_has_them()
+    {
+        var asked = new List<string>();
+        var layout = EngineLayout.Bundled(@"C:\Program Files\Pounce", @"C:\Users\me\AppData\Local\Pounce",
+            folder => { asked.Add(folder); return true; });
+
+        Assert.Equal([@"C:\Program Files\Pounce\native\onnxruntime"], asked);
+        Assert.Equal(@"C:\Program Files\Pounce\native\onnxruntime", layout.OnnxRuntimeNatives);
+        Assert.Equal(
+            [
+                "-Xmx256m", "-XX:+UseG1GC", "-XX:+UseCompactObjectHeaders", "-XX:G1PeriodicGCInterval=60000",
+                "--add-modules", "jdk.incubator.vector", "--enable-native-access=ALL-UNNAMED",
+                "-Dspring.config.additional-location=optional:file:C:/Users/me/AppData/Local/Pounce/pounce.yml",
+                "-Dpounce.parent-pid=4242",
+                // A native path, not a URL: backslashes, and no quotes (ArgumentList quotes the space itself).
+                @"-Donnxruntime.native.path=C:\Program Files\Pounce\native\onnxruntime",
+                "-jar", @"C:\Program Files\Pounce\engine\pounce-engine.jar",
+                @"--pounce.home=C:\Users\me\AppData\Local\Pounce",
+                @"--pounce.model-dir=C:\Program Files\Pounce\models\bge-small-en-v1.5",
+            ],
+            layout.ArgumentsFor(4242));
+    }
+
+    [Fact]
+    public void Without_the_bundled_dlls_onnx_runtime_unpacks_its_own()
+    {
+        var layout = EngineLayout.Bundled(@"C:\Program Files\Pounce\", @"C:\Users\me\AppData\Local\Pounce", _ => false);
+
+        Assert.Null(layout.OnnxRuntimeNatives);
+        Assert.DoesNotContain(layout.ArgumentsFor(4242), argument => argument.Contains("onnxruntime", StringComparison.Ordinal));
+        Assert.Equal(EngineLayout.Bundled(@"C:\Program Files\Pounce\", @"C:\Users\me\AppData\Local\Pounce"), layout);
+    }
+
+    [Fact]
     public void The_engine_watches_this_process()
     {
         var layout = EngineLayout.Bundled(@"C:\Pounce", @"C:\Data");
