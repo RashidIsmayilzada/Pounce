@@ -59,16 +59,28 @@ public static class IconLoader
         }
     }
 
-    /// <summary>Async void on purpose: an event-style fire-and-forget that catches everything itself.</summary>
+    /// <summary>
+    /// Async void on purpose: an event-style fire-and-forget that catches everything itself. A provider may answer
+    /// null for a request it dropped because newer ones queued up (fast typing); when the row still shows the item by
+    /// then, it is asked once more.
+    /// </summary>
     private static async void LoadInto(Image image, SearchItem item, IIconProvider provider)
     {
         try
         {
-            ImageSource? icon = await provider.LoadAsync(item);
-            // The continuation is back on the UI thread (the provider's contract). The row may show another item now.
-            if (icon is not null && Equals(GetItem(image), item))
+            for (int attempt = 0; attempt < 2; attempt++)
             {
-                image.Source = icon;
+                ImageSource? icon = await provider.LoadAsync(item);
+                // The continuation is back on the UI thread (the provider's contract). The row may show another item now.
+                if (!Equals(GetItem(image), item))
+                {
+                    return;
+                }
+                if (icon is not null)
+                {
+                    image.Source = icon;
+                    return;
+                }
             }
         }
         catch (Exception ex)

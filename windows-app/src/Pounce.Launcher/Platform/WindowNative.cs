@@ -217,6 +217,9 @@ internal static partial class WindowNative
     /// <summary>True when <paramref name="hwnd"/> is the foreground window.</summary>
     public static bool IsForeground(IntPtr hwnd) => GetForegroundWindow() == hwnd;
 
+    /// <summary>The foreground window; zero when there is none.</summary>
+    public static IntPtr ForegroundWindow() => GetForegroundWindow();
+
     /// <summary>Who owns the foreground window.</summary>
     public static ForegroundOwner CurrentForegroundOwner()
     {
@@ -238,6 +241,9 @@ internal static partial class WindowNative
     /// the documented way to share the foreground right is to attach this thread's input to the foreground window's
     /// thread for the duration of the call (AttachThreadInput): both threads then share one input state, and
     /// SetForegroundWindow succeeds. The attachment is undone at once. True when the window is now in the foreground.
+    /// While attached, focus changes are delivered to the other thread synchronously, so a hung foreground window
+    /// would hang Pounce too: then (IsHungAppWindow) the attach is skipped, and so is anything elevated that refuses
+    /// it (AttachThreadInput fails across integrity levels).
     /// </remarks>
     public static bool ForceForeground(IntPtr hwnd)
     {
@@ -248,7 +254,7 @@ internal static partial class WindowNative
         IntPtr foreground = GetForegroundWindow();
         uint foregroundThread = foreground == IntPtr.Zero ? 0 : GetWindowThreadProcessId(foreground, out _);
         uint thisThread = GetCurrentThreadId();
-        bool attached = foregroundThread != 0 && foregroundThread != thisThread
+        bool attached = foregroundThread != 0 && foregroundThread != thisThread && !IsHungAppWindow(foreground)
             && AttachThreadInput(thisThread, foregroundThread, true);
         try
         {
@@ -337,6 +343,11 @@ internal static partial class WindowNative
     // DWORD GetWindowThreadProcessId(HWND hWnd, LPDWORD lpdwProcessId); returns the thread id, 0 on failure.
     [LibraryImport("user32.dll", SetLastError = true)]
     private static partial uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    // BOOL IsHungAppWindow(HWND hwnd); true when the window's thread has not taken messages for 5 seconds.
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsHungAppWindow(IntPtr hwnd);
 
     // DWORD GetCurrentThreadId(void);
     [LibraryImport("kernel32.dll")]

@@ -62,6 +62,9 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
     private bool closed;
     private bool hidePending;
     private Action? afterHidden;
+    private bool backdrop;
+    private DispatcherTimer? unfocusedWatch;
+    private IntPtr foregroundAtShow;
 
     /// <summary>Creates the panel, hidden, with its window handle and visual tree ready.</summary>
     public LauncherWindow(SearchModel model, IShellActions shell, IIconProvider icons)
@@ -113,6 +116,7 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
         _ = WindowNative.ApplyPanelStyles(hwnd);
         RefreshTheme();
         Place();
+        foregroundAtShow = WindowNative.ForegroundWindow();
         shown = true;
         shownAt = Environment.TickCount64;
         ShowActivated = true;
@@ -242,7 +246,7 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
         // Before the backdrop, so the material starts in the right theme.
         _ = WindowNative.SetDarkFrame(hwnd, theme is { Light: false });
 
-        bool backdrop = WindowNative.TryApplyAcrylic(hwnd, out string detail);
+        backdrop = WindowNative.TryApplyAcrylic(hwnd, out string detail);
         if (backdrop && source?.CompositionTarget is { } target)
         {
             // WPF must leave the pixels it does not paint transparent, or the backdrop would be covered in black.
@@ -252,8 +256,11 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
         {
             backdrop = false;
         }
-        // Fallback: an opaque background in the theme's colour over the whole window.
+        // Fallback: an opaque background in the theme's colour over the whole window, and the same colour for
+        // pixels WPF has not painted yet (the strip a growing window gains before the next frame), which would
+        // otherwise show the extended frame: black on Windows 10.
         Host.SetResourceReference(Panel.BackgroundProperty, backdrop ? "PanelTintBrush" : "PanelOpaqueBrush");
+        SyncCompositionBackground();
         Log.Info(backdrop ? "Panel: acrylic backdrop" : $"Panel: opaque background ({detail})");
     }
 
@@ -396,8 +403,39 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
         if (!WindowNative.IsForeground(hwnd) && !WindowNative.ForceForeground(hwnd))
         {
             Log.Warn("Windows did not let the panel take the foreground; it gets the focus when clicked");
+            WatchWhileUnfocused();
         }
         FocusSearchField();
+    }
+
+    /// <summary>
+    /// A panel that never got the focus never loses it either, so nothing would hide it when the user clicks
+    /// elsewhere. While it is shown without the focus, check four times a second who is in front: once that is a
+    /// window of another program other than the one in front when the panel was shown, the user has moved on, so hide.
+    /// Clicking the panel activates it and ends the watch (from then on, losing the focus hides it as usual).
+    /// </summary>
+    private void WatchWhileUnfocused()
+    {
+        if (unfocusedWatch is null)
+        {
+            unfocusedWatch = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(250) };
+            unfocusedWatch.Tick += (_, _) =>
+            {
+                if (!shown || IsActive)
+                {
+                    unfocusedWatch.Stop();
+                    return;
+                }
+                IntPtr foreground = WindowNative.ForegroundWindow();
+                if (foreground != foregroundAtShow && foreground != hwnd
+                    && WindowNative.CurrentForegroundOwner() == ForegroundOwner.OtherProcess)
+                {
+                    unfocusedWatch.Stop();
+                    HidePanel();
+                }
+            };
+        }
+        unfocusedWatch.Start();
     }
 
     private void FocusSearchField()
@@ -516,24 +554,30 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
         }
     }
 
-    /// <summary>Opens (or reveals) the selected row once the panel is hidden, so what opens gets the foreground.</summary>
+    /// <summary>
+    /// Opens (or reveals) the selected row. Everything happens now, inside the handling of the key press or click:
+    /// that input is what gives Pounce the right to pass the foreground on. So: allow any process to take the
+    /// foreground (while Pounce still has it), hide the panel at once (not a frame later as on Esc: by then the
+    /// key-up may have gone to the app Windows activated in its place, and the right would be gone), then ask the
+    /// shell to open the item, which starts it asynchronously and lets it come to the front.
+    /// </summary>
     private void OpenSelected(bool reveal)
     {
         if (model.Selected is not { } item)
         {
             return;
         }
-        HideThen(() => Launch(item, reveal));
-    }
-
-    private void Launch(SearchItem item, bool reveal)
-    {
-        // Pounce still has the foreground right from the key press or click that got here (it received the last
-        // input event): pass it on to whatever opens, so that comes to the front instead of flashing in the taskbar.
         if (!WindowNative.AllowAnyProcessToTakeForeground())
         {
             Log.Info("AllowSetForegroundWindow was refused; the opened item may not come to the front");
         }
+        HideThen(null);
+        FinishHide();
+        Launch(item, reveal);
+    }
+
+    private void Launch(SearchItem item, bool reveal)
+    {
         try
         {
             if (reveal)
@@ -583,6 +627,12 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
         {
             case nameof(SearchModel.Items):
                 SyncRows();
+                if (rows.Count > 0 && (model.Selection < 0 || model.Selection >= rows.Count))
+                {
+                    // Re-ranking the apps after a reload changes the rows without resetting the selection, which
+                    // can then point past the end (Enter would do nothing). Searches reset it themselves.
+                    model.Selection = 0;
+                }
                 SyncSelection();
                 SyncResultsVisibility();
                 break;
@@ -719,9 +769,23 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
                 _ = WindowNative.SetDarkFrame(hwnd, !next.Light);
             }
         }
+        SyncCompositionBackground();
         Resources["AccentBrush"] = Frozen(next.Accent);
         // The selected row: the accent at 22 %, as on macOS.
         Resources["SelectionBrush"] = Frozen(Color.FromArgb(0x38, next.Accent.R, next.Accent.G, next.Accent.B));
+    }
+
+    /// <summary>Without a backdrop, what WPF has not painted yet is the opaque panel colour rather than black.</summary>
+    private void SyncCompositionBackground()
+    {
+        if (backdrop || hwnd == IntPtr.Zero || HwndSource.FromHwnd(hwnd)?.CompositionTarget is not { } target)
+        {
+            return;
+        }
+        if (TryFindResource("PanelOpaqueBrush") is SolidColorBrush opaque)
+        {
+            target.BackgroundColor = opaque.Color;
+        }
     }
 
     private static SolidColorBrush Frozen(Color color)

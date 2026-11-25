@@ -60,7 +60,8 @@ Before you start: run `Pounce.exe` with an Engine running (bundled, or `POUNCE_U
 | Hold Alt+Space down for two seconds. | The panel opens once and stays open; it does not flicker on and off. |
 | Right-click the tray icon while the panel is open. | The panel hides and the menu opens. |
 | Choose "Search" in the tray menu. | The panel opens and stays open with the caret in the field (it must not hide again as the menu closes). |
-| Start `Pounce.exe` a second time while Pounce runs. | The running Pounce shows its panel, in front, with the caret in the field. If it shows but without the focus, check `launcher.log` for "did not let the panel take the foreground". |
+| Start `Pounce.exe` a second time while Pounce runs. | The running Pounce shows its panel, in front, with the caret in the field. If it shows but without the focus, check `launcher.log` for "did not let the panel take the foreground"; clicking the panel must then give it the focus, and clicking another window must hide it within a quarter second. |
+| Open the panel while an app run as administrator (e.g. an elevated Terminal) is in front, and while a hung app ("Not Responding") is in front. | The panel shows; Pounce itself never freezes. If it has no focus, the row above applies. |
 | Lock the screen (Win+L) with the panel open, then unlock. | The panel is hidden. |
 
 ## 6. Several monitors and scaling
