@@ -15,7 +15,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Contract for reading text files: UTF-8, with or without a byte order mark, and UTF-16 when a byte order mark says
- * so (as Windows tools write it, for example PowerShell's {@code >}). Anything else has no text.
+ * so (as Windows tools write it, for example PowerShell's {@code >}), and otherwise the Windows code page
+ * windows-1252. A file with NUL bytes and no UTF-16 byte order mark is binary and has no text.
  */
 class PlainTextExtractorTest {
 
@@ -49,6 +50,12 @@ class PlainTextExtractorTest {
         byte[] bom = {(byte) 0xFE, (byte) 0xFF};
 
         assertThat(extractor.extract(write(bom, NOTE, StandardCharsets.UTF_16BE))).hasValue(NOTE);
+    }
+
+    @Test
+    void reads_text_in_the_windows_ansi_code_page_when_it_is_not_utf8() throws IOException {
+        // Notepad's "ANSI", and many older Windows tools: one accented letter makes it invalid UTF-8.
+        assertThat(extractor.extract(write(new byte[0], NOTE, Charset.forName("windows-1252")))).hasValue(NOTE);
     }
 
     @Test

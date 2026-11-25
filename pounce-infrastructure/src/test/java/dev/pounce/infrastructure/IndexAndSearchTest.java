@@ -261,6 +261,18 @@ class IndexAndSearchTest {
     }
 
     @Test
+    void a_note_saved_in_the_windows_ansi_code_page_is_found_by_its_words() throws IOException {
+        byte[] text = "Café rollout checklist".getBytes(java.nio.charset.Charset.forName("windows-1252"));
+        Files.write(folder.resolve("checklist.txt"), text);
+
+        engine.indexer().reconcile();
+
+        assertThat(engine.searcher().search(Query.of("café"), Phase.EARLY))
+                .extracting(Result::path)
+                .containsExactly(folder.resolve("checklist.txt"));
+    }
+
+    @Test
     void a_document_without_readable_text_is_still_found_by_its_name() throws IOException {
         Files.write(folder.resolve("scanned-passport.pdf"), new byte[]{(byte) 0xFF, (byte) 0xFE, 0, 1, 2});
         engine.indexer().reconcile();

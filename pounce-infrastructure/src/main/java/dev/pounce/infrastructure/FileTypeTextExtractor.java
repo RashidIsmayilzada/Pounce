@@ -7,7 +7,7 @@ import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Optional;
 
-/** Picks the reader by file type: PDFs through PDFBox, everything else as UTF-8 text. */
+/** Picks the reader by file type: PDFs through PDFBox, everything else as text ({@link PlainTextExtractor}). */
 public final class FileTypeTextExtractor implements TextExtractor {
 
     private final TextExtractor pdf = new PdfTextExtractor();
