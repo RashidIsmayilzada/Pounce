@@ -11,6 +11,7 @@ import dev.pounce.infrastructure.FolderWatcher;
 import dev.pounce.infrastructure.LucenePassageIndex;
 import dev.pounce.infrastructure.OnnxEmbedder;
 import dev.pounce.infrastructure.FileTypeTextExtractor;
+import dev.pounce.platform.PounceHome;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -28,12 +29,12 @@ class EngineConfiguration {
 
     @Bean
     Credentials credentials(PounceProperties properties) {
-        return Credentials.in(properties.home());
+        return Credentials.in(new PounceHome(properties.home()));
     }
 
     @Bean(destroyMethod = "close")
     LucenePassageIndex passageIndex(PounceProperties properties) {
-        return LucenePassageIndex.open(properties.home().resolve("index"));
+        return LucenePassageIndex.open(new PounceHome(properties.home()).index());
     }
 
     @Bean(destroyMethod = "close")
