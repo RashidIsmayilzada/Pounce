@@ -134,6 +134,48 @@ class IndexAndSearchTest {
     }
 
     @Test
+    void a_folder_that_cannot_be_read_does_not_stop_the_others() throws IOException {
+        write("locked/secret.md", "canary secret");
+        write("open/notes.md", "canary notes");
+        Path locked = folder.resolve("locked");
+
+        try (var _ = Unreadable.make(locked)) {
+            engine.indexer().reconcile();
+        }
+
+        assertThat(engine.searcher().search(Query.of("canary"), Phase.FINAL))
+                .extracting(Result::path)
+                .containsExactly(folder.resolve("open/notes.md"));
+    }
+
+    @Test
+    void documents_in_a_folder_that_cannot_be_read_for_now_are_kept() throws IOException {
+        write("locked/secret.md", "canary secret");
+        engine.indexer().reconcile();
+
+        try (var _ = Unreadable.make(folder.resolve("locked"))) {
+            engine.indexer().reconcile();
+        }
+
+        assertThat(engine.searcher().search(Query.of("canary"), Phase.FINAL))
+                .extracting(Result::path)
+                .containsExactly(folder.resolve("locked/secret.md"));
+    }
+
+    @Test
+    void a_watched_folder_that_does_not_exist_is_skipped() throws IOException {
+        write("notes.md", "The canary rollout went fine.");
+        engine = TestEngine.over(List.of(folder.resolve("unplugged-drive"), folder), TestEngine.exclusionsFor(folder),
+                new HashingEmbedder(), LucenePassageIndex.inMemory());
+
+        engine.indexer().reconcile();
+
+        assertThat(engine.searcher().search(Query.of("canary"), Phase.FINAL))
+                .extracting(Result::path)
+                .containsExactly(folder.resolve("notes.md"));
+    }
+
+    @Test
     void a_document_without_readable_text_is_still_found_by_its_name() throws IOException {
         Files.write(folder.resolve("scanned-passport.pdf"), new byte[]{(byte) 0xFF, (byte) 0xFE, 0, 1, 2});
         engine.indexer().reconcile();

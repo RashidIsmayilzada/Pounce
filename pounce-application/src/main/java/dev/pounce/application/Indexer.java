@@ -23,6 +23,8 @@ import java.util.function.Consumer;
 /** Keeps the Index in agreement with what is on disk in the Watched Folders. */
 public final class Indexer {
 
+    private static final System.Logger LOG = System.getLogger(Indexer.class.getName());
+
     private final List<WatchedFolder> folders;
     private final Exclusions exclusions;
     private final TextExtractor extractor;
@@ -40,30 +42,51 @@ public final class Indexer {
         this.index = index;
     }
 
-    /** Walk every Watched Folder and make the whole Index agree with disk. */
+    /**
+     * Walk every Watched Folder and make the whole Index agree with disk. A Watched Folder that does not exist, and
+     * a file or folder that cannot be read, is logged and skipped; the rest is still indexed.
+     */
     public void reconcile() {
         Set<Path> onDisk = new HashSet<>();
+        List<Path> unreadable = new ArrayList<>();
         for (WatchedFolder folder : folders) {
-            Path root = realPath(folder.path());
-            walk(root, root, file -> {
-                refreshFile(root, file);
-                onDisk.add(realPath(file));
-            });
+            Optional<Path> root = existingRoot(folder);
+            if (root.isEmpty()) {
+                continue;
+            }
+            walk(root.get(), root.get(), file -> {
+                try {
+                    onDisk.add(file.toRealPath());
+                    refreshFile(root.get(), file);
+                } catch (IOException | RuntimeException e) {
+                    LOG.log(System.Logger.Level.WARNING, "Could not index {0}: {1}", file, e.toString());
+                }
+            }, unreadable::add);
         }
         for (Path document : index.documents()) {
             // Re-check the disk: the file may have been created (and indexed by a live refresh) after the walk.
-            if (!onDisk.contains(document) && !Files.exists(document)) {
+            // Documents in a folder that could not be read this time are kept: the folder is still there.
+            if (!onDisk.contains(document) && !isInside(document, unreadable) && !Files.exists(document)) {
                 index.remove(document);
             }
         }
     }
 
-    private static Path realPath(Path file) {
+    private static Optional<Path> existingRoot(WatchedFolder folder) {
         try {
-            return file.toRealPath();
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+            Path root = folder.path().toRealPath();
+            if (Files.isDirectory(root)) {
+                return Optional.of(root);
+            }
+        } catch (IOException missing) {
+            // Logged below.
         }
+        LOG.log(System.Logger.Level.INFO, "Watched Folder {0} does not exist; skipped", folder.path());
+        return Optional.empty();
+    }
+
+    private static boolean isInside(Path document, List<Path> folders) {
+        return folders.stream().anyMatch(document::startsWith);
     }
 
     /**
@@ -78,7 +101,13 @@ public final class Indexer {
             } else if (Files.isDirectory(path)) {
                 Path folder = path.toRealPath();
                 Path watchedFolder = watchedFolderOf(folder);
-                walk(watchedFolder, folder, file -> refreshFile(watchedFolder, file));
+                walk(watchedFolder, folder, file -> {
+                    try {
+                        refreshFile(watchedFolder, file);
+                    } catch (RuntimeException e) {
+                        LOG.log(System.Logger.Level.WARNING, "Could not index {0}: {1}", file, e.toString());
+                    }
+                }, unreadable -> { });
             } else {
                 refreshFile(watchedFolderOf(path.toRealPath()), path);
             }
@@ -89,9 +118,10 @@ public final class Indexer {
 
     /**
      * Visits every regular file below {@code start} (a link to a file counts; links to folders are not followed),
-     * without entering excluded folders.
+     * without entering excluded folders. A file or folder that cannot be read is logged, reported to
+     * {@code onUnreadable} and skipped.
      */
-    private void walk(Path watchedFolder, Path start, Consumer<Path> onFile) {
+    private void walk(Path watchedFolder, Path start, Consumer<Path> onFile, Consumer<Path> onUnreadable) {
         try {
             Files.walkFileTree(start, new SimpleFileVisitor<>() {
                 @Override
@@ -104,6 +134,21 @@ public final class Indexer {
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
                     if (attrs.isRegularFile() || attrs.isSymbolicLink() && Files.isRegularFile(file)) {
                         onFile.accept(file);
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFileFailed(Path file, IOException e) {
+                    LOG.log(System.Logger.Level.INFO, "Skipped {0}: it cannot be read ({1})", file, e.toString());
+                    onUnreadable.accept(file);
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult postVisitDirectory(Path dir, IOException e) {
+                    if (e != null) {
+                        visitFileFailed(dir, e);
                     }
                     return FileVisitResult.CONTINUE;
                 }
