@@ -244,6 +244,22 @@ class IndexAndSearchTest {
     }
 
     @Test
+    void a_note_saved_as_utf16_by_a_windows_tool_is_found_by_its_words() throws IOException {
+        byte[] text = "Canary rollout checklist".getBytes(java.nio.charset.StandardCharsets.UTF_16LE);
+        byte[] withBom = new byte[text.length + 2];
+        withBom[0] = (byte) 0xFF;
+        withBom[1] = (byte) 0xFE;
+        System.arraycopy(text, 0, withBom, 2, text.length);
+        Files.write(folder.resolve("checklist.txt"), withBom);
+
+        engine.indexer().reconcile();
+
+        assertThat(engine.searcher().search(Query.of("rollout"), Phase.EARLY))
+                .extracting(Result::path)
+                .containsExactly(folder.resolve("checklist.txt"));
+    }
+
+    @Test
     void a_document_without_readable_text_is_still_found_by_its_name() throws IOException {
         Files.write(folder.resolve("scanned-passport.pdf"), new byte[]{(byte) 0xFF, (byte) 0xFE, 0, 1, 2});
         engine.indexer().reconcile();
