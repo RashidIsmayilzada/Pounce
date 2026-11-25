@@ -1,11 +1,12 @@
 # Smoke-checks build\Pounce-windows-x64\Pounce\Pounce.exe on a temporary home and Watched Folder (never your real folders):
 #   1. Pounce.exe starts its bundled Engine, which indexes the folder and answers a search through the API, with
 #      ONNX Runtime's DLLs loaded from the bundle's native\onnxruntime rather than unpacked into the temp folder;
-#   2. closing Pounce (Pounce.exe --quit) also stops the Engine;
-#   3. force-killing Pounce still stops the Engine.
+#   2. closing Pounce (Pounce.exe --quit, which exits with 0) also stops the Engine;
+#   3. force-killing Pounce, once its Engine answers, still stops the Engine.
 # Build it first with scripts/build-windows.sh, then, in Windows PowerShell 5.1 or PowerShell 7:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke-windows.ps1
-# Port 7431 must be free, so quit any running Pounce first.
+# Port 7431 must be free, so quit any running Pounce first. POUNCE_NO_DIALOGS keeps every message box away, so nothing
+# waits for a click.
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -93,15 +94,23 @@ function Get-EnginePid([int]$LauncherPid) {
     return 0
 }
 
-function Wait-EnginePid([System.Diagnostics.Process]$Launcher, [int]$Seconds) {
+# Waits until the Engine of this Launcher has indexed the Watched Folder and finds falconry.md; returns the seconds taken.
+# Only then has the Engine finished starting up: closing a Spring context waits for a startup still in progress, so an
+# Engine whose Launcher dies mid-startup outlives it by most of that startup.
+function Wait-SearchAnswered([System.Diagnostics.Process]$Launcher, [string]$HomeDir, [int]$Seconds) {
     $clock = [System.Diagnostics.Stopwatch]::StartNew()
-    while ($clock.Elapsed.TotalSeconds -lt $Seconds) {
-        $id = Get-EnginePid $Launcher.Id
-        if ($id) { return $id }
-        if ($Launcher.HasExited) { throw "Pounce.exe exited with code $($Launcher.ExitCode) before starting the Engine" }
-        Start-Sleep -Milliseconds 500
+    $lastProblem = 'falconry.md not in the results'
+    while ($true) {
+        if ($clock.Elapsed.TotalSeconds -ge $Seconds) { throw "no search result after $Seconds s (last: $lastProblem)" }
+        if ($Launcher.HasExited) { throw "Pounce.exe exited with code $($Launcher.ExitCode)" }
+        try {
+            if ((Search-Engine $HomeDir 'falcon glove') -contains 'falconry.md') { return $clock.Elapsed.TotalSeconds }
+            $lastProblem = 'falconry.md not in the results'
+        } catch {
+            $lastProblem = $_.Exception.Message   # not up yet, or still indexing
+        }
+        Start-Sleep -Seconds 1
     }
-    throw "no Engine child process found within $Seconds s"
 }
 
 function Wait-Gone([int]$Id, [int]$Seconds) {
@@ -123,11 +132,24 @@ function Get-OrtTempFolders {
 }
 
 $launchers = New-Object System.Collections.ArrayList
-function Start-Pounce {
-    $process = Start-Process -FilePath $Exe -PassThru
-    $null = $process.Handle   # keeps the handle, so ExitCode is still readable after it exits
-    $null = $launchers.Add($process)
+# Starts Pounce.exe with these arguments and this process's environment. Process.Start, unlike Start-Process in Windows
+# PowerShell 5.1, holds the process handle from the start, so ExitCode stays readable however soon it exits.
+function Start-Pounce([string]$Arguments = '') {
+    $info = New-Object System.Diagnostics.ProcessStartInfo $Exe, $Arguments
+    $info.UseShellExecute = $false
+    $process = [System.Diagnostics.Process]::Start($info)
+    $null = $launchers.Add($process)   # cleaned up at the end if it is still running
     return $process
+}
+
+# The last lines of a log of this run, or a line saying it is not there.
+function Show-LogTail([string]$Path) {
+    if (Test-Path -LiteralPath $Path) {
+        Write-Host "--- last lines of $Path"
+        Get-Content -LiteralPath $Path -Tail 30 | ForEach-Object { Write-Host $_ }
+    } else {
+        Write-Host "(no $Path)"
+    }
 }
 
 $base = $env:RUNNER_TEMP
@@ -136,6 +158,7 @@ $Tmp = Join-Path $base ('pounce-smoke-' + [System.Guid]::NewGuid().ToString('N')
 $HomeDir = Join-Path $Tmp 'home'
 $Watched = Join-Path $Tmp 'watched'
 $savedPounceHome = $env:POUNCE_HOME
+$savedNoDialogs = $env:POUNCE_NO_DIALOGS
 $exitCode = 0
 
 try {
@@ -146,26 +169,15 @@ try {
     # Forward slashes in single quotes: YAML takes the path literally, and Java accepts / on Windows.
     $watchedYaml = ($Watched -replace '\\', '/') -replace "'", "''"
     [System.IO.File]::WriteAllText((Join-Path $HomeDir 'pounce.yml'), "pounce:`n  watched-folders: '$watchedYaml'`n", $utf8)
+    # Inherited by every process started below: this run's home, and no message box that would wait for a click.
     $env:POUNCE_HOME = $HomeDir
+    $env:POUNCE_NO_DIALOGS = '1'
 
     # 1. Starts the Engine, which indexes the folder and answers a search.
     $ortBefore = @(Get-OrtTempFolders)
     $launcher = Start-Pounce
-    $clock = [System.Diagnostics.Stopwatch]::StartNew()
-    $found = $false
-    $lastProblem = 'falconry.md not in the results'
-    while (-not $found) {
-        if ($clock.Elapsed.TotalSeconds -ge 90) { throw "no search result after 90 s (last: $lastProblem)" }
-        if ($launcher.HasExited) { throw "Pounce.exe exited with code $($launcher.ExitCode)" }
-        try {
-            $found = (Search-Engine $HomeDir 'falcon glove') -contains 'falconry.md'
-            $lastProblem = 'falconry.md not in the results'
-        } catch {
-            $lastProblem = $_.Exception.Message   # not up yet, or still indexing
-        }
-        if (-not $found) { Start-Sleep -Seconds 1 }
-    }
-    Write-Host ('ok   bundled Engine answered a search {0:N0} s after launch' -f $clock.Elapsed.TotalSeconds)
+    $seconds = Wait-SearchAnswered $launcher $HomeDir 90
+    Write-Host ('ok   bundled Engine answered a search {0:N0} s after launch' -f $seconds)
 
     # ONNX Runtime is loaded by now (the search embedded the query), so any DLLs it unpacked are there.
     $ortNew = @(Get-OrtTempFolders | Where-Object { $ortBefore -notcontains $_ })
@@ -181,11 +193,12 @@ try {
     $workingSet = (Get-Process -Id $engine).WorkingSet64 / 1MB
     Write-Host ('ok   Engine runs as pid {0} with {1:N0} MB' -f $engine, $workingSet)
 
-    # 2. Closing Pounce politely: a second Pounce.exe --quit asks the first to exit.
-    $quit = Start-Process -FilePath $Exe -ArgumentList '--quit' -PassThru
-    $null = $launchers.Add($quit)   # cleaned up like the others if it hangs
-    if (-not $quit.WaitForExit(15000)) { throw 'Pounce.exe --quit did not return within 15 s' }
-    if (-not $launcher.WaitForExit(15000)) { throw 'Pounce.exe still running 15 s after Pounce.exe --quit' }
+    # 2. Closing Pounce politely: a second Pounce.exe --quit asks the first to exit and waits up to 20 s for it; it exits
+    #    with 0 once the first has exited.
+    $quit = Start-Pounce '--quit'
+    if (-not $quit.WaitForExit(25000)) { throw 'Pounce.exe --quit did not return within 25 s' }
+    if ($quit.ExitCode -ne 0) { throw "Pounce.exe --quit exited with code $($quit.ExitCode): the running Pounce did not quit" }
+    if (-not $launcher.WaitForExit(15000)) { throw 'Pounce.exe still running 15 s after Pounce.exe --quit returned 0' }
     if (-not (Wait-Gone $engine 15)) { throw 'Engine still running 15 s after Pounce quit' }
     Write-Host 'ok   quitting Pounce stopped the Engine'
     # An Engine that exits through System.exit removes its empty folder; one that is killed leaves it (0 bytes).
@@ -194,39 +207,36 @@ try {
         Write-Host ('note: {0} empty onnxruntime-java folder(s) left in {1}: the Engine did not exit cleanly' -f $ortLeft.Count, $TempDir)
     }
 
-    # 3. Force-killing Pounce still stops the Engine.
+    # 3. Force-killing Pounce still stops the Engine: once it has started up (see Wait-SearchAnswered); the Engine then
+    #    shuts down through Spring, which may take a while for an Engine still indexing.
     $launcher = Start-Pounce
-    $engine = Wait-EnginePid $launcher 90
-    Start-Sleep -Seconds 3
+    $null = Wait-SearchAnswered $launcher $HomeDir 90
+    $engine = Get-EnginePid $launcher.Id
+    if (-not $engine) { throw 'no Engine child process found' }
     Stop-Process -Id $launcher.Id -Force
-    if (-not (Wait-Gone $engine 15)) { throw 'orphaned Engine still running 15 s after Pounce.exe was killed' }
+    if (-not (Wait-Gone $engine 30)) { throw 'orphaned Engine still running 30 s after Pounce.exe was killed' }
     Write-Host 'ok   force-killing Pounce still stopped the Engine'
 
     Write-Host 'PASS'
 } catch {
     Write-Host "FAIL: $($_.Exception.Message)"
-    $log = Join-Path $HomeDir 'logs\engine.log'
-    if (Test-Path -LiteralPath $log) {
-        Write-Host "--- last lines of $log"
-        Get-Content -LiteralPath $log -Tail 20 | ForEach-Object { Write-Host $_ }
-    } else {
-        Write-Host "(no $log)"
-    }
+    Show-LogTail (Join-Path $HomeDir 'logs\launcher.log')
+    Show-LogTail (Join-Path $HomeDir 'logs\engine.log')
     $exitCode = 1
 } finally {
     foreach ($process in $launchers) {
         if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
     }
-    # Any Engine of this run: started by one of its launchers, or using its home.
+    # Any Engine of this run: one started by one of its launchers (the home is not on its command line).
     $ours = @($launchers | ForEach-Object { $_.Id })
     Get-CimInstance Win32_Process -Filter "Name = 'java.exe' OR Name = 'javaw.exe'" |
         Where-Object {
             $commandLine = $_.CommandLine
-            $commandLine -and ($commandLine.Contains($HomeDir) -or
-                @($ours | Where-Object { $commandLine -match ('pounce\.parent-pid=' + $_ + '(\D|$)') }).Count -gt 0)
+            $commandLine -and @($ours | Where-Object { $commandLine -match ('pounce\.parent-pid=' + $_ + '(\D|$)') }).Count -gt 0
         } |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     $env:POUNCE_HOME = $savedPounceHome
+    $env:POUNCE_NO_DIALOGS = $savedNoDialogs
     for ($try = 0; (Test-Path -LiteralPath $Tmp) -and $try -lt 10; $try++) {
         Remove-Item -LiteralPath $Tmp -Recurse -Force -ErrorAction SilentlyContinue
         if (Test-Path -LiteralPath $Tmp) { Start-Sleep -Milliseconds 500 }
