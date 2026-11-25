@@ -239,12 +239,12 @@ public sealed class ShellActions : IShellActions
     /// <summary>
     /// Tells the user, in a message box on the calling (shell) thread, so the UI thread is never blocked. By then the
     /// panel has hidden and another program may have the foreground, so the box has no owner, asks for the foreground
-    /// and is topmost: it never opens unseen behind that program. In an unattended run (<see cref="DialogsAllowed"/>
-    /// false) the problem is only logged.
+    /// and is topmost: it never opens unseen behind that program. In an unattended run (see
+    /// <see cref="FailureNotice.MayShowDialog"/>) the problem is only logged.
     /// </summary>
     private static void Problem(string message)
     {
-        if (!DialogsAllowed())
+        if (!FailureNotice.MayShowDialog(Environment.UserInteractive, Environment.GetEnvironmentVariable(FailureNotice.NoDialogsVariable)))
         {
             Log.Warn("Not shown (no dialogs): " + message);
             return;
@@ -262,11 +262,4 @@ public sealed class ShellActions : IShellActions
             Log.Warn("Could not show a message: " + message, e);
         }
     }
-
-    /// <summary>
-    /// False in an unattended run, where nobody would close a dialog: when the process is not interactive
-    /// (<see cref="Environment.UserInteractive"/>) or the environment variable <c>POUNCE_NO_DIALOGS</c> is set.
-    /// </summary>
-    private static bool DialogsAllowed() =>
-        Environment.UserInteractive && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("POUNCE_NO_DIALOGS"));
 }
