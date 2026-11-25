@@ -8,14 +8,17 @@ import dev.pounce.domain.WatchedFolder;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Stream;
+import java.util.function.Consumer;
 
 /** Keeps the Index in agreement with what is on disk in the Watched Folders. */
 public final class Indexer {
@@ -41,14 +44,11 @@ public final class Indexer {
     public void reconcile() {
         Set<Path> onDisk = new HashSet<>();
         for (WatchedFolder folder : folders) {
-            try (Stream<Path> files = Files.walk(folder.path())) {
-                files.filter(Files::isRegularFile).forEach(file -> {
-                    refresh(file);
-                    onDisk.add(realPath(file));
-                });
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
+            Path root = realPath(folder.path());
+            walk(root, root, file -> {
+                refreshFile(root, file);
+                onDisk.add(realPath(file));
+            });
         }
         for (Path document : index.documents()) {
             // Re-check the disk: the file may have been created (and indexed by a live refresh) after the walk.
@@ -76,12 +76,38 @@ public final class Indexer {
             if (!Files.exists(path)) {
                 forget(lastKnownLocation(path));
             } else if (Files.isDirectory(path)) {
-                try (Stream<Path> files = Files.walk(path)) {
-                    files.filter(Files::isRegularFile).forEach(this::refreshFile);
-                }
+                Path folder = path.toRealPath();
+                Path watchedFolder = watchedFolderOf(folder);
+                walk(watchedFolder, folder, file -> refreshFile(watchedFolder, file));
             } else {
-                refreshFile(path);
+                refreshFile(watchedFolderOf(path.toRealPath()), path);
             }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /**
+     * Visits every regular file below {@code start} (a link to a file counts; links to folders are not followed),
+     * without entering excluded folders.
+     */
+    private void walk(Path watchedFolder, Path start, Consumer<Path> onFile) {
+        try {
+            Files.walkFileTree(start, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                    return exclusions.excludesFolder(watchedFolder, dir) ? FileVisitResult.SKIP_SUBTREE
+                            : FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                    if (attrs.isRegularFile() || attrs.isSymbolicLink() && Files.isRegularFile(file)) {
+                        onFile.accept(file);
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+            });
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -96,11 +122,12 @@ public final class Indexer {
         }
     }
 
-    private void refreshFile(Path path) {
+    /** Calls are serialised with {@link #refresh}, so a live change and the reconcile never interleave on a file. */
+    private synchronized void refreshFile(Path watchedFolder, Path path) {
         try {
             Path file = path.toRealPath();
             FileStamp stamp = new FileStamp(Files.size(file), Files.getLastModifiedTime(file).toMillis());
-            if (exclusions.excludes(file, stamp.size())) {
+            if (exclusions.excludes(watchedFolder, file, stamp.size())) {
                 return;
             }
             Optional<FileStamp> stored = index.stamp(file);
@@ -120,6 +147,25 @@ public final class Indexer {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    /**
+     * The real location of the Watched Folder this real path lies in (the innermost, if they nest). A path in none
+     * of them (reached through a link) is judged from the top of its file system, so every folder on it counts.
+     */
+    private Path watchedFolderOf(Path real) {
+        Path best = null;
+        for (WatchedFolder folder : folders) {
+            try {
+                Path root = folder.path().toRealPath();
+                if (real.startsWith(root) && (best == null || root.getNameCount() > best.getNameCount())) {
+                    best = root;
+                }
+            } catch (IOException missing) {
+                // A Watched Folder that does not exist contains nothing.
+            }
+        }
+        return best != null ? best : real.getRoot();
     }
 
     /** A deleted file has no real path any more; resolve its folder instead, which matches how it was stored. */

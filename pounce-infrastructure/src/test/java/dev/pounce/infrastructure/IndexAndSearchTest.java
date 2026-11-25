@@ -1,6 +1,7 @@
 package dev.pounce.infrastructure;
 
 import dev.pounce.application.Phase;
+import dev.pounce.domain.Exclusions;
 import dev.pounce.domain.Query;
 import dev.pounce.domain.Result;
 import dev.pounce.domain.Snippet;
@@ -101,6 +102,35 @@ class IndexAndSearchTest {
         assertThat(engine.searcher().search(Query.of("canary"), Phase.FINAL))
                 .extracting(Result::path)
                 .containsExactly(folder.resolve("app/main.py"));
+    }
+
+    @Test
+    void the_index_is_not_indexed_when_it_lives_inside_a_watched_folder() throws IOException {
+        Path pounceHome = folder.resolve("pounce-data");
+        write("pounce-data/index/segments.txt", "canary");
+        write("notes.md", "The canary rollout went fine.");
+        engine = TestEngine.over(List.of(folder), Exclusions.defaults(folder.resolve("no-home"), pounceHome),
+                new HashingEmbedder(), LucenePassageIndex.inMemory());
+
+        engine.indexer().reconcile();
+
+        assertThat(engine.searcher().search(Query.of("canary"), Phase.FINAL))
+                .extracting(Result::path)
+                .containsExactly(folder.resolve("notes.md"));
+    }
+
+    @Test
+    void a_watched_folder_inside_a_hidden_folder_is_indexed_but_hidden_folders_inside_it_are_not() throws IOException {
+        Path watched = folder.resolve(".local/notes");
+        write(".local/notes/plan.md", "canary plan");
+        write(".local/notes/.git/config", "canary config");
+        engine = TestEngine.over(watched);
+
+        engine.indexer().reconcile();
+
+        assertThat(engine.searcher().search(Query.of("canary"), Phase.FINAL))
+                .extracting(Result::path)
+                .containsExactly(watched.resolve("plan.md"));
     }
 
     @Test

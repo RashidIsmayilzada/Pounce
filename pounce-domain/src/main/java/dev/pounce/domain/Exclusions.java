@@ -1,35 +1,99 @@
 package dev.pounce.domain;
 
+import java.io.IOException;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Set;
 
-/** Rules that keep paths inside a Watched Folder out of the Index. */
+/**
+ * Rules that keep paths inside a Watched Folder out of the Index. Every check is made relative to the Watched
+ * Folder the path was reached through, because the user chose that folder and nothing above it:
+ * <ul>
+ *   <li><b>Name rules</b> look only at the folders below the Watched Folder (and the file's own name): hidden
+ *       folders ({@code .git}), dependency and build folders ({@code node_modules}, {@code target}…), Windows system
+ *       folders ({@code $Recycle.Bin}, {@code System Volume Information}), and the files {@code desktop.ini},
+ *       {@code Thumbs.db} and Office lock files ({@code ~$report.docx}). The Watched Folder's own path is never
+ *       judged by name, so a Watched Folder inside a hidden folder or under {@code AppData\Local\Temp} is indexed.</li>
+ *   <li><b>Location rules</b> skip the places where programs keep their own files: {@code ~/Library},
+ *       {@code ~/AppData} and {@code ~/snap}. They apply when the walk reaches such a place from a Watched Folder
+ *       above it (for example the whole home folder); a Watched Folder chosen inside one of them is indexed.</li>
+ *   <li><b>The Pounce home</b> (where the Index itself lives) is always skipped, even when the Watched Folder is
+ *       inside it: indexing the Index would feed its own writes back into it.</li>
+ *   <li><b>Size:</b> files over 50 MB.</li>
+ * </ul>
+ * A path that is not below the given Watched Folder (a link pointing elsewhere) is judged by every folder on it.
+ * Names are compared exactly, except the Windows names, which ignore case as Windows does.
+ */
 public final class Exclusions {
 
     private static final long MAX_SIZE_BYTES = 50L * 1024 * 1024;
     private static final Set<String> SKIPPED_FOLDERS = Set.of(
             "node_modules", "venv", "site-packages", "__pycache__", "target", "build");
 
-    private final Path library;
+    private final List<Path> programLocations;
+    private final Path pounceHome;
 
-    private Exclusions(Path library) {
-        this.library = library;
+    private Exclusions(List<Path> programLocations, Path pounceHome) {
+        this.programLocations = programLocations;
+        this.pounceHome = pounceHome;
     }
 
-    public static Exclusions defaults(Path home) {
-        return new Exclusions(home.resolve("Library"));
+    /**
+     * The standard rules for this user. Both folders are resolved to their real location when they exist, since
+     * the paths being judged are real paths.
+     */
+    public static Exclusions defaults(Path userHome, Path pounceHome) {
+        Path home = real(userHome);
+        return new Exclusions(
+                List.of(home.resolve("Library"), home.resolve("AppData"), home.resolve("snap")), real(pounceHome));
     }
 
-    public boolean excludes(Path path, long sizeBytes) {
-        if (sizeBytes > MAX_SIZE_BYTES || path.startsWith(library)) {
+    /** Whether this file, reached through this Watched Folder, stays out of the Index. */
+    public boolean excludes(Path watchedFolder, Path file, long sizeBytes) {
+        if (sizeBytes > MAX_SIZE_BYTES || isSkippedFileName(file.getFileName().toString())) {
             return true;
         }
-        for (Path part : path.getParent() == null ? Path.of("") : path.getParent()) {
-            String name = part.toString();
-            if (name.startsWith(".") || SKIPPED_FOLDERS.contains(name)) {
+        Path folder = file.getParent();
+        return folder != null && excludesFolder(watchedFolder, folder);
+    }
+
+    /**
+     * Whether this folder, reached through this Watched Folder, stays out of the Index with everything inside it.
+     * Lets a walk skip a whole subtree without looking inside.
+     */
+    public boolean excludesFolder(Path watchedFolder, Path folder) {
+        if (folder.startsWith(pounceHome)) {
+            return true;
+        }
+        for (Path location : programLocations) {
+            if (folder.startsWith(location) && !watchedFolder.startsWith(location)) {
+                return true;
+            }
+        }
+        Path below = folder.startsWith(watchedFolder) ? watchedFolder.relativize(folder) : folder;
+        for (Path part : below) {
+            if (isSkippedFolderName(part.toString())) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static boolean isSkippedFolderName(String name) {
+        return name.startsWith(".") || name.startsWith("$") || SKIPPED_FOLDERS.contains(name)
+                || name.equalsIgnoreCase("System Volume Information");
+    }
+
+    private static boolean isSkippedFileName(String name) {
+        return name.equalsIgnoreCase("desktop.ini") || name.equalsIgnoreCase("Thumbs.db") || name.startsWith("~$");
+    }
+
+    private static Path real(Path path) {
+        Path absolute = path.toAbsolutePath().normalize();
+        try {
+            return absolute.toRealPath();
+        } catch (IOException doesNotExistYet) {
+            return absolute;
+        }
     }
 }

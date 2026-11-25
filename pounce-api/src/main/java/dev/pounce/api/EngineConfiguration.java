@@ -46,7 +46,7 @@ class EngineConfiguration {
     Indexer indexer(PounceProperties properties, Embedder embedder, PassageIndex index) {
         return new Indexer(
                 properties.watchedFolders().stream().map(WatchedFolder::new).toList(),
-                Exclusions.defaults(Path.of(System.getProperty("user.home"))),
+                Exclusions.defaults(Path.of(System.getProperty("user.home")), properties.home()),
                 new FileTypeTextExtractor(), new PassageSplitter(), embedder, index);
     }
 
