@@ -3,8 +3,11 @@ namespace Pounce.Core;
 /// <summary>An installed application.</summary>
 /// <param name="Name">The name shown and matched, such as "Visual Studio Code".</param>
 /// <param name="Path">
-/// What the shell launches: a <c>.lnk</c> file path, or <c>shell:AppsFolder\&lt;AppUserModelId&gt;</c> for a Store
-/// app. Also the app's identity.
+/// What the shell launches, and the app's identity. From the Apps folder, any app's: <c>shell:AppsFolder\</c> and the
+/// item's parsing name, an AppUserModelId for a Store app (<c>shell:AppsFolder\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App</c>)
+/// and for a desktop app with one, or a path-like id for other desktop apps
+/// (<c>shell:AppsFolder\{6D809377-6AF0-444B-8957-A3773F02200E}\7-Zip\7zFM.exe</c>, a KNOWNFOLDERID and the rest of
+/// the path). From the Start Menu shortcuts: the <c>.lnk</c> file's path.
 /// </param>
 public sealed record AppEntry(string Name, string Path)
 {
