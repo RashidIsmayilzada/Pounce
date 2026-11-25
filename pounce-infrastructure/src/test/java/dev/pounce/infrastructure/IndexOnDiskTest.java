@@ -16,7 +16,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Executor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -59,11 +61,14 @@ class IndexOnDiskTest {
     }
 
     @Test
-    void live_changes_reach_the_disk_together_shortly_after() throws IOException {
+    void live_changes_reach_the_disk_together_in_one_commit() throws IOException {
         write("notes.md", "The canary rollout went fine.");
-        index = LucenePassageIndex.open(indexFolder, Duration.ofSeconds(1));
+        // Scheduled commits wait here until the test says their delay is over, however slow the machine is.
+        List<Runnable> delayedCommits = new ArrayList<>();
+        index = LucenePassageIndex.open(indexFolder, (Executor) delayedCommits::add);
         var engine = engineOver(index);
         engine.indexer().reconcile();
+        runAll(delayedCommits);
         long reconciled = lastCommit();
 
         for (int i = 0; i < 10; i++) {
@@ -72,8 +77,28 @@ class IndexOnDiskTest {
         }
 
         assertThat(lastCommit()).as("not one commit per change").isEqualTo(reconciled);
-        assertThat(eventuallyOnDisk(11)).isTrue();
+        assertThat(delayedCommits).as("one commit waiting for the whole burst").hasSize(1);
+        runAll(delayedCommits);
+        assertThat(documentsOnDisk()).isEqualTo(11);
         assertThat(lastCommit()).as("one commit for the whole burst").isEqualTo(reconciled + 1);
+    }
+
+    @Test
+    void a_live_change_reaches_the_disk_on_its_own_shortly_after() throws IOException {
+        index = LucenePassageIndex.open(indexFolder, Duration.ofMillis(100));
+        var engine = engineOver(index);
+        engine.indexer().reconcile();
+
+        write("notes.md", "The canary rollout went fine.");
+        engine.indexer().refresh(folder.resolve("notes.md"));
+
+        assertThat(eventuallyOnDisk(1)).isTrue();
+    }
+
+    private static void runAll(List<Runnable> tasks) {
+        List<Runnable> due = List.copyOf(tasks);
+        tasks.clear();
+        due.forEach(Runnable::run);
     }
 
     private TestEngine engineOver(LucenePassageIndex index) {

@@ -111,9 +111,8 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
     private final Executor committer;
     private final AtomicBoolean commitScheduled = new AtomicBoolean();
 
-    private LucenePassageIndex(Directory directory, Duration commitDelay) {
-        this.committer = CompletableFuture.delayedExecutor(commitDelay.toMillis(), TimeUnit.MILLISECONDS,
-                task -> Thread.ofVirtual().name("index-commit").start(task));
+    private LucenePassageIndex(Directory directory, Executor committer) {
+        this.committer = committer;
         try {
             var config = new IndexWriterConfig(analyzer);
             config.setCodec(new Lucene104Codec() {
@@ -143,7 +142,7 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
     }
 
     public static LucenePassageIndex inMemory() {
-        return new LucenePassageIndex(new ByteBuffersDirectory(), COMMIT_DELAY);
+        return new LucenePassageIndex(new ByteBuffersDirectory(), after(COMMIT_DELAY));
     }
 
     /** Opens (or creates) the Index stored in this folder. */
@@ -152,11 +151,21 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
     }
 
     static LucenePassageIndex open(Path folder, Duration commitDelay) {
+        return open(folder, after(commitDelay));
+    }
+
+    /** With the scheduled commits run by {@code committer}, which decides when; tests run them by hand. */
+    static LucenePassageIndex open(Path folder, Executor committer) {
         try {
-            return new LucenePassageIndex(FSDirectory.open(folder), commitDelay);
+            return new LucenePassageIndex(FSDirectory.open(folder), committer);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    private static Executor after(Duration delay) {
+        return CompletableFuture.delayedExecutor(delay.toMillis(), TimeUnit.MILLISECONDS,
+                task -> Thread.ofVirtual().name("index-commit").start(task));
     }
 
     @Override
