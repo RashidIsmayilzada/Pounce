@@ -107,7 +107,9 @@ public sealed class EngineProcessStarter : IProcessStarter
     /// deadline: when the Launcher exits (the normal case, right after <c>EngineSupervisor.Stop</c> in
     /// <c>App.OnExit</c>), the deadline dies with it and the Engine closes on its own. If the Launcher is still
     /// running when the deadline passes (a Terminate without a quit, or a quit that hangs), the Engine and anything
-    /// it started are killed, so no Engine is ever left running forever.</para>
+    /// it started are killed, so no Engine is ever left running forever. So a Stop followed by a new start in the
+    /// same Launcher would find the old Engine still holding its port for up to that deadline; nothing does that
+    /// today (Stop is only called on quit).</para>
     /// <para>Output. Two background threads copy stdout and stderr, as raw bytes, to the log and flush after every
     /// read, so the pipes never fill up (a chatty Engine never blocks) and a crash's last words are on disk. The log is
     /// closed once both pipes have ended, and the exit is reported after that (or after 2 s at most).</para>
@@ -240,7 +242,14 @@ public sealed class EngineProcessStarter : IProcessStarter
                     {
                         lock (gate)
                         {
-                            log.Dispose();
+                            try
+                            {
+                                log.Dispose(); // flushes what a failed write left in the buffer, which can fail again
+                            }
+                            catch (Exception e) when (e is IOException or ObjectDisposedException)
+                            {
+                                Log.Warn("Closing the Engine log failed", e);
+                            }
                         }
                         drained.Set();
                     }
