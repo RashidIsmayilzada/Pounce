@@ -122,6 +122,19 @@ class ExclusionsTest {
         assertThat(excludes(HOME.resolve("Documents"), "projects/notes.md")).isFalse();
     }
 
+    @Test
+    void cloud_only_files_and_windows_system_files_are_recognised_by_their_attributes() {
+        int archive = 0x20;
+        assertThat(Exclusions.isCloudOnlyOrSystem(archive)).isFalse();
+        assertThat(Exclusions.isCloudOnlyOrSystem(0)).isFalse();
+        assertThat(Exclusions.isCloudOnlyOrSystem(archive | 0x400000)).as("recall on data access").isTrue();
+        assertThat(Exclusions.isCloudOnlyOrSystem(archive | 0x40000)).as("recall on open").isTrue();
+        assertThat(Exclusions.isCloudOnlyOrSystem(archive | 0x1000)).as("offline").isTrue();
+        assertThat(Exclusions.isCloudOnlyOrSystem(archive | 0x4)).as("system").isTrue();
+        assertThat(Exclusions.isCloudOnlyOrSystem(archive | 0x2 | 0x1)).as("hidden, read-only").isFalse();
+        assertThat(Exclusions.isCloudOnlyOrSystem(0x80000 | 0x100000)).as("pinned / unpinned, but local").isFalse();
+    }
+
     private boolean excludes(Path watchedFolder, String below) {
         return defaults.excludes(watchedFolder, HOME.resolve(below), SMALL);
     }

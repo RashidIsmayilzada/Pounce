@@ -8,6 +8,7 @@ import dev.pounce.domain.WatchedFolder;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.FileSystems;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,6 +25,9 @@ import java.util.function.Consumer;
 public final class Indexer {
 
     private static final System.Logger LOG = System.getLogger(Indexer.class.getName());
+    private static final boolean HAS_WINDOWS_ATTRIBUTES =
+            FileSystems.getDefault().supportedFileAttributeViews().contains("dos")
+                    && !FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
 
     private final List<WatchedFolder> folders;
     private final Exclusions exclusions;
@@ -212,6 +216,11 @@ public final class Indexer {
             if (stored.filter(s -> s.equals(stamp) || s.equals(FileStamp.UNKNOWN)).isPresent()) {
                 return;
             }
+            if (isCloudOnlyOrSystem(file)) {
+                // No stamp is stored, so once the file has been downloaded (its attributes change) it is read.
+                LOG.log(System.Logger.Level.DEBUG, "Skipped {0}: only in the cloud, or a system file", file);
+                return;
+            }
             String text;
             try {
                 text = extractor.extract(file).orElse("");
@@ -249,6 +258,22 @@ public final class Indexer {
             }
         }
         return best != null ? best : real.getRoot();
+    }
+
+    /**
+     * Reads the Windows file attributes, only where they are real: Linux emulates the {@code dos} view with extended
+     * attributes that no cloud client sets, so there (and wherever POSIX permissions exist) reading costs a system
+     * call for nothing.
+     */
+    private static boolean isCloudOnlyOrSystem(Path file) {
+        if (!HAS_WINDOWS_ATTRIBUTES) {
+            return false;
+        }
+        try {
+            return Exclusions.isCloudOnlyOrSystem((Integer) Files.getAttribute(file, "dos:attributes"));
+        } catch (IOException | RuntimeException unknown) {
+            return false;
+        }
     }
 
     /** A deleted file has no real path any more; resolve its folder instead, which matches how it was stored. */

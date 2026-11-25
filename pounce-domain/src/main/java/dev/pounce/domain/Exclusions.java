@@ -20,6 +20,8 @@ import java.util.Set;
  *   <li><b>The Pounce home</b> (where the Index itself lives) is always skipped, even when the Watched Folder is
  *       inside it: indexing the Index would feed its own writes back into it.</li>
  *   <li><b>Size:</b> files over 50 MB.</li>
+ *   <li><b>Windows file attributes</b> ({@link #isCloudOnlyOrSystem}): files that are only in the cloud, and system
+ *       files.</li>
  * </ul>
  * A path that is not below the given Watched Folder (a link pointing elsewhere) is judged by every folder on it.
  * Names are compared exactly, except the Windows names, which ignore case as Windows does.
@@ -27,6 +29,10 @@ import java.util.Set;
 public final class Exclusions {
 
     private static final long MAX_SIZE_BYTES = 50L * 1024 * 1024;
+    private static final int SYSTEM = 0x4;
+    private static final int OFFLINE = 0x1000;
+    private static final int RECALL_ON_OPEN = 0x4_0000;
+    private static final int RECALL_ON_DATA_ACCESS = 0x40_0000;
     private static final Set<String> SKIPPED_FOLDERS = Set.of(
             "node_modules", "venv", "site-packages", "__pycache__", "target", "build");
 
@@ -77,6 +83,15 @@ public final class Exclusions {
             }
         }
         return false;
+    }
+
+    /**
+     * Whether a file with these Windows file attributes ({@code dos:attributes}) stays out of the Index: a cloud
+     * placeholder (OneDrive and other cloud drives mark files that are only in the cloud as recall-on-access, or
+     * offline), since reading it would download it, and Windows system files.
+     */
+    public static boolean isCloudOnlyOrSystem(int windowsAttributes) {
+        return (windowsAttributes & (RECALL_ON_DATA_ACCESS | RECALL_ON_OPEN | OFFLINE | SYSTEM)) != 0;
     }
 
     private static boolean isSkippedFolderName(String name) {
