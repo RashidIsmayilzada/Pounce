@@ -32,7 +32,8 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           version="${VERSION#v}"
-          sha=$(gh release download "v$version" -R "$GITHUB_REPOSITORY" -p '*.sha256' -O - | awk '{print $1}')
+          # The cask installs the macOS zip; a release also carries the Windows zip and its checksum.
+          sha=$(gh release download "v$version" -R "$GITHUB_REPOSITORY" -p "Pounce-$version-macos-arm64.zip.sha256" -O - | awk '{print $1}')
           [[ "$sha" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::No checksum found for release v$version"; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
