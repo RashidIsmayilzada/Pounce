@@ -43,10 +43,15 @@ class EngineConfiguration {
     }
 
     @Bean
-    Indexer indexer(PounceProperties properties, Embedder embedder, PassageIndex index) {
+    Exclusions exclusions(PounceProperties properties) {
+        return Exclusions.defaults(Path.of(System.getProperty("user.home")), properties.home());
+    }
+
+    @Bean
+    Indexer indexer(PounceProperties properties, Exclusions exclusions, Embedder embedder, PassageIndex index) {
         return new Indexer(
                 properties.watchedFolders().stream().map(WatchedFolder::new).toList(),
-                Exclusions.defaults(Path.of(System.getProperty("user.home")), properties.home()),
+                exclusions,
                 new FileTypeTextExtractor(), new PassageSplitter(), embedder, index);
     }
 
@@ -57,8 +62,8 @@ class EngineConfiguration {
 
     /** Live changes: created before the startup reconcile runs, so nothing saved during it is missed. */
     @Bean(destroyMethod = "close")
-    FolderWatcher folderWatcher(PounceProperties properties, Indexer indexer) {
-        return FolderWatcher.start(properties.watchedFolders(), indexer::refresh);
+    FolderWatcher folderWatcher(PounceProperties properties, Exclusions exclusions, Indexer indexer) {
+        return FolderWatcher.start(properties.watchedFolders(), exclusions, indexer::refresh);
     }
 
     /** Catch up with changes made while the Engine was not running, without delaying startup. */
