@@ -1,5 +1,6 @@
 using System.IO;
 using System.Windows;
+using System.Windows.Threading;
 using Pounce.Core;
 using Pounce.Launcher.Platform;
 
@@ -21,11 +22,17 @@ public partial class App : Application
     private GlobalHotKey? hotKey;
     private TrayIcon? tray;
     private LauncherWindow? panel;
+    private long crashBurstStart;
+    private int crashBurstCount;
 
     /// <inheritdoc/>
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        // Registered first; messages are dropped until Log.Start below.
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
+        AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandledException;
+        TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
         if (e.Args.Contains("--quit"))
         {
             Shutdown(SingleInstance.SignalQuit(TimeSpan.FromSeconds(20)) ? 0 : 1);
@@ -53,13 +60,15 @@ public partial class App : Application
         hotKey.Pressed += (_, _) => panel.Toggle();
         tray = new TrayIcon(new TrayMenu(
             supervisor, hotKey.Registered, new LoginItem(),
-            Search: panel.ShowPanel,
+            // Deferred until the tray menu has closed and handed back the focus, so the panel is shown after that.
+            Search: () => Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(panel.ShowPanel)),
             EditSettings: () => shell.OpenInEditor(configuration.Home.ConfigFile),
             Quit: Shutdown));
 
         instance.ShowRequested += (_, _) => Dispatcher.BeginInvoke(new Action(panel.ShowPanel));
         instance.QuitRequested += (_, _) => Dispatcher.BeginInvoke(new Action(Shutdown));
-        _ = model.ReloadAppsAsync();
+        // The panel reloads the apps each time it is shown; this first listing is ready before the first show.
+        panel.ReloadApps();
     }
 
     /// <inheritdoc/>
@@ -83,6 +92,50 @@ public partial class App : Application
         }
         supervisor = new EngineSupervisor(layout, new EngineProcessStarter(configuration.Home.EngineLog),
             configuration.CreateEngineProbe());
-        _ = supervisor.StartAsync();
+        Observe(supervisor.StartAsync(), "Starting the Engine");
+    }
+
+    /// <summary>Logs the failure of a task nobody awaits. Async void on purpose: it catches everything itself.</summary>
+    private static async void Observe(Task task, string what)
+    {
+        try
+        {
+            await task;
+        }
+        catch (Exception e)
+        {
+            Log.Warn($"{what} failed", e);
+        }
+    }
+
+    /// <summary>
+    /// An exception on the UI thread that nothing caught: logged, and the app keeps running, since a tray app that
+    /// vanishes over one failed click or bad result is worse than one that logs it. Exceptions coming back at once,
+    /// over and over (a broken layout or render pass would), are not survivable that way: after 10 within 10
+    /// seconds, the next one ends the process as WPF would by default.
+    /// </summary>
+    private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+    {
+        long now = Environment.TickCount64;
+        if (now - crashBurstStart > 10_000)
+        {
+            crashBurstStart = now;
+            crashBurstCount = 0;
+        }
+        crashBurstCount++;
+        e.Handled = crashBurstCount <= 10;
+        Log.Warn(e.Handled ? "Unhandled exception on the UI thread; carrying on" : "Unhandled exceptions keep coming; quitting",
+            e.Exception);
+    }
+
+    /// <summary>An exception on another thread: the runtime ends the process after this; the log says why.</summary>
+    private static void OnDomainUnhandledException(object sender, UnhandledExceptionEventArgs e) =>
+        Log.Warn($"Unhandled exception (terminating: {e.IsTerminating})", e.ExceptionObject as Exception);
+
+    /// <summary>A failed task that nobody awaited: logged and marked observed.</summary>
+    private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+    {
+        Log.Warn("Unobserved task exception", e.Exception);
+        e.SetObserved();
     }
 }
