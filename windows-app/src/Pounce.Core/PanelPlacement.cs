@@ -72,5 +72,20 @@ public static class PanelPlacement
         return Math.Max(MinResultsHeightDip, below - BarHeightDip - dividerDip - BottomMarginDip);
     }
 
+    /// <summary>
+    /// The panel window's height, in DIPs, for content <paramref name="contentDip"/> tall. While a search runs, the
+    /// window may grow but never shrinks: Early Results are often fewer than the Final Results a few milliseconds
+    /// later, and following them would make the panel collapse and regrow on most keystrokes. Once the search is final
+    /// (or the Query is cleared) the window fits its content again. Never shorter than the search bar.
+    /// </summary>
+    /// <param name="currentDip">The window's height now.</param>
+    /// <param name="contentDip">The content's natural height.</param>
+    /// <param name="searching">True while a search is running (<see cref="SearchModel.IsSearching"/>).</param>
+    public static double WindowHeightDip(double currentDip, double contentDip, bool searching)
+    {
+        double fit = double.IsFinite(contentDip) ? Math.Max(BarHeightDip, contentDip) : BarHeightDip;
+        return searching && double.IsFinite(currentDip) ? Math.Max(currentDip, fit) : fit;
+    }
+
     private static double Scale(double dpi) => dpi > 0 ? dpi / 96.0 : 1.0;
 }

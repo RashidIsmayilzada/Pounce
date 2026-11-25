@@ -4,9 +4,10 @@ using Pounce.Core;
 namespace Pounce.Launcher.Views;
 
 /// <summary>
-/// One row of the panel as the list shows it. Rows are kept and updated in place between searches, so when the
-/// Final Results replace the Early Results only the text that differs changes: no row is rebuilt and nothing flashes.
-/// Each property announces a change only when its value really changed.
+/// One row of the panel as the list shows it. Rows are pooled: they are kept and updated in place between searches,
+/// and a row with nothing to show is hidden (<see cref="IsVisible"/>) rather than removed, so when the Final Results
+/// replace the Early Results only the text that differs changes: no row, container or template is rebuilt and nothing
+/// flashes. Each property announces a change only when its value really changed.
 /// </summary>
 public sealed class RowModel : INotifyPropertyChanged
 {
@@ -16,6 +17,8 @@ public sealed class RowModel : INotifyPropertyChanged
     private Snippet snippet = Snippet.Empty;
     private string? title;
     private bool isApp;
+    private bool isVisible;
+    private int sizeOfSet;
 
     /// <inheritdoc/>
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -44,15 +47,28 @@ public sealed class RowModel : INotifyPropertyChanged
     /// <summary>True for an application row, false for a file row.</summary>
     public bool IsApp => isApp;
 
+    /// <summary>
+    /// False for a pooled row that shows nothing now: its container is collapsed, so it takes no space, is not hit by
+    /// the mouse and is left out of the accessibility tree (<see cref="ResultsListBox"/>). Visible rows always come
+    /// first, so a row's index is its index in <see cref="SearchModel.Items"/>.
+    /// </summary>
+    public bool IsVisible => isVisible;
+
+    /// <summary>How many rows are visible, for screen readers ("3 of 5"): the hidden pooled rows do not count.</summary>
+    public int SizeOfSet => sizeOfSet;
+
     /// <summary>What a screen reader says for the row.</summary>
     public string AccessibleName => isApp ? $"{name}, application" : $"{name}, {location}";
 
-    /// <summary>Shows <paramref name="newItem"/> in this row.</summary>
+    /// <summary>Shows <paramref name="newItem"/> in this row, and the row itself.</summary>
     /// <param name="newItem">The row's application or Result.</param>
     /// <param name="newTitle">The section title above the row, or null.</param>
     /// <param name="userProfile">The user's profile folder, to shorten paths inside it.</param>
-    public void Show(SearchItem newItem, string? newTitle, string? userProfile)
+    /// <param name="visibleRows">How many rows are visible in all.</param>
+    public void Show(SearchItem newItem, string? newTitle, string? userProfile, int visibleRows)
     {
+        Set(ref isVisible, true, nameof(IsVisible));
+        Set(ref sizeOfSet, visibleRows, nameof(SizeOfSet));
         if (Equals(item, newItem) && title == newTitle)
         {
             return;
@@ -67,6 +83,12 @@ public sealed class RowModel : INotifyPropertyChanged
         Set(ref snippet, newSnippet, nameof(Snippet), nameof(HasSnippet));
         Raise(nameof(AccessibleName));
     }
+
+    /// <summary>
+    /// Hides the row. It keeps its item, so showing the same item in it again (common while typing) costs nothing,
+    /// icon included.
+    /// </summary>
+    public void Hide() => Set(ref isVisible, false, nameof(IsVisible));
 
     /// <summary>For screen readers that fall back to the item's text.</summary>
     public override string ToString() => AccessibleName;

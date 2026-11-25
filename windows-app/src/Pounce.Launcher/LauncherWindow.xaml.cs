@@ -21,7 +21,11 @@ namespace Pounce.Launcher;
 /// <para>Speed: the window, its HWND and its visual tree are built once at startup and shown once off-screen (so
 /// fonts, templates and the render target exist before the first real show); afterwards it is only shown and hidden.
 /// Showing reads two registry values and moves the window; nothing else. Typing writes straight to
-/// <see cref="SearchModel.Query"/>, and result rows are updated in place.</para>
+/// <see cref="SearchModel.Query"/>, and result rows are pooled and updated in place (see <see cref="SyncRows"/>).</para>
+/// <para>Steadiness: each keystroke brings Early Results (often only a few) and then Final Results (often 8). While a
+/// search runs the window may grow but never shrinks (<see cref="PanelPlacement.WindowHeightDip"/>), so it does not
+/// collapse and regrow on every letter; rows the Early Results do not fill are hidden, leaving an empty band below
+/// them until the Final Results arrive. Once the search is final the window fits its content.</para>
 /// <para>Look: a framed window whose frame the content covers (WindowChrome), so DWM gives it a shadow, rounded corners
 /// and, on Windows 11 22H2 and later, the acrylic backdrop under a translucent tint. Anywhere the backdrop cannot be
 /// applied (Windows 10, Windows 11 21H2, a DWM failure), the content paints an opaque themed background instead,
@@ -62,6 +66,8 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
     private bool focusCheckPending;
     private bool themeCheckPending;
     private bool spinning;
+    private bool fitPending;
+    private int visibleRows;
     private bool closed;
     private bool hidePending;
     private Action? afterHidden;
@@ -378,13 +384,48 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
         }
     }
 
-    /// <summary>The window's height follows the content's natural height; the top edge stays where it is.</summary>
+    /// <summary>
+    /// The window's height follows the content's natural height, except that it does not shrink while a search runs
+    /// (<see cref="PanelPlacement.WindowHeightDip"/>); the top edge stays where it is.
+    /// </summary>
     private void Root_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         if (e.HeightChanged)
         {
-            Height = Math.Max(PanelPlacement.BarHeightDip, e.NewSize.Height);
+            FitHeight(e.NewSize.Height);
         }
+    }
+
+    private void FitHeight(double content)
+    {
+        double height = PanelPlacement.WindowHeightDip(Height, content, model.IsSearching);
+        if (height != Height)
+        {
+            Height = height;
+        }
+    }
+
+    /// <summary>
+    /// Once no search runs any more, fits the window to its content after the layout pass that the last change
+    /// queued. Needed besides <see cref="Root_SizeChanged"/>: the content may not change size at all when the search
+    /// ends (the Final Results as tall as the Early ones), while the window is still taller from an earlier search.
+    /// </summary>
+    private void FitHeightWhenSettled()
+    {
+        if (fitPending)
+        {
+            return;
+        }
+        fitPending = true;
+        // Loaded runs after the layout pass (Render priority) of the changes already made.
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+        {
+            fitPending = false;
+            if (!model.IsSearching)
+            {
+                FitHeight(Root.ActualHeight);
+            }
+        }));
     }
 
     // ---- Activation and focus ----
@@ -608,11 +649,11 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
     private void RowMouseUp(object sender, MouseButtonEventArgs e)
     {
         RowModel? row = (sender as FrameworkElement)?.DataContext as RowModel;
-        bool clicked = row is not null && ReferenceEquals(row, pressedRow);
+        bool clicked = row is { IsVisible: true } && ReferenceEquals(row, pressedRow);
         pressedRow = null;
         e.Handled = true;
         int index = clicked ? rows.IndexOf(row!) : -1;
-        if (index >= 0)
+        if (index >= 0 && index < visibleRows)
         {
             model.Selection = index;
             OpenSelected(reveal: false);
@@ -630,7 +671,7 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
         {
             case nameof(SearchModel.Items):
                 // The model keeps the selection inside the rows (and on the same item across an apps reload).
-                SyncRows();
+                SyncRows(model.Items);
                 SyncSelection();
                 SyncResultsVisibility();
                 break;
@@ -642,48 +683,53 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
                 SyncResultsVisibility();
                 break;
             case nameof(SearchModel.Query):
+                SyncSpinner();
+                break;
             case nameof(SearchModel.IsSearching):
                 SyncSpinner();
+                if (!model.IsSearching)
+                {
+                    FitHeightWhenSettled();
+                }
                 break;
             default:
                 break;
         }
     }
 
-    /// <summary>Updates the rows in place: existing rows take the new items, extra rows are added or removed at the end.</summary>
-    private void SyncRows()
+    /// <summary>
+    /// Shows <paramref name="items"/> in the pooled rows: row i shows item i, rows past the items are hidden, and
+    /// a row is only added when there are more items than ever before (at most 3 apps + 8 Results). The list never
+    /// removes or re-adds a container, so replacing Early Results by Final Results only updates bound properties.
+    /// Visible rows come first, so a row's index is its item's index (and the model's <see cref="SearchModel.Selection"/>).
+    /// </summary>
+    private void SyncRows(IReadOnlyList<SearchItem> items)
     {
-        IReadOnlyList<SearchItem> items = model.Items;
         int appCount = 0;
         while (appCount < items.Count && items[appCount] is AppItem)
         {
             appCount++;
         }
-        while (rows.Count > items.Count)
-        {
-            rows.RemoveAt(rows.Count - 1);
-        }
         for (int i = 0; i < items.Count; i++)
         {
-            string? title = PanelSections.TitleAbove(i, appCount);
-            if (i < rows.Count)
+            if (i == rows.Count)
             {
-                rows[i].Show(items[i], title, userProfile);
+                rows.Add(new RowModel());
             }
-            else
-            {
-                var row = new RowModel();
-                row.Show(items[i], title, userProfile);
-                rows.Add(row);
-            }
+            rows[i].Show(items[i], PanelSections.TitleAbove(i, appCount), userProfile, items.Count);
         }
+        for (int i = items.Count; i < rows.Count; i++)
+        {
+            rows[i].Hide();
+        }
+        visibleRows = items.Count;
     }
 
-    /// <summary>The list's selection follows the model's, never the other way round.</summary>
+    /// <summary>The list's selection follows the model's, never the other way round; hidden rows are never selected.</summary>
     private void SyncSelection()
     {
         int index = model.Selection;
-        int target = index >= 0 && index < rows.Count ? index : -1;
+        int target = index >= 0 && index < visibleRows ? index : -1;
         if (ResultsList.SelectedIndex != target)
         {
             ResultsList.SelectedIndex = target;
@@ -697,7 +743,7 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
     private void SyncResultsVisibility()
     {
         bool message = model.Message is not null;
-        Visibility results = rows.Count > 0 || message ? Visibility.Visible : Visibility.Collapsed;
+        Visibility results = visibleRows > 0 || message ? Visibility.Visible : Visibility.Collapsed;
         Divider.Visibility = results;
         ResultsScroller.Visibility = results;
         MessageText.Visibility = message ? Visibility.Visible : Visibility.Collapsed;

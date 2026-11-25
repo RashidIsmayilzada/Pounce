@@ -71,6 +71,41 @@ public class PanelPlacementTests
 
         Assert.Equal(PanelPlacement.MinResultsHeightDip, PanelPlacement.MaxResultsHeightDip(work, 50, 96));
     }
+
+    [Fact]
+    public void While_a_search_runs_the_panel_grows_but_does_not_shrink()
+    {
+        // Early Results with two rows after Final Results with eight: the height stays.
+        Assert.Equal(600, PanelPlacement.WindowHeightDip(600, 180, searching: true));
+        // More rows than before: it grows.
+        Assert.Equal(700, PanelPlacement.WindowHeightDip(600, 700, searching: true));
+        // Nothing below the search bar yet: it stays too.
+        Assert.Equal(600, PanelPlacement.WindowHeightDip(600, PanelPlacement.BarHeightDip, searching: true));
+    }
+
+    [Fact]
+    public void Once_the_search_is_final_the_panel_fits_its_content()
+    {
+        Assert.Equal(180, PanelPlacement.WindowHeightDip(600, 180, searching: false));
+        Assert.Equal(700, PanelPlacement.WindowHeightDip(600, 700, searching: false));
+        // A cleared Query: back to the search bar.
+        Assert.Equal(PanelPlacement.BarHeightDip, PanelPlacement.WindowHeightDip(600, PanelPlacement.BarHeightDip, searching: false));
+    }
+
+    [Theory]
+    [InlineData(600, 0, false)]
+    [InlineData(600, -5, false)]
+    [InlineData(0, 0, true)]
+    [InlineData(double.NaN, 20, true)]
+    [InlineData(double.NaN, double.NaN, false)]
+    [InlineData(40, double.PositiveInfinity, true)]
+    public void The_panel_is_never_shorter_than_the_search_bar_nor_unsized(double current, double content, bool searching)
+    {
+        double height = PanelPlacement.WindowHeightDip(current, content, searching);
+
+        Assert.True(double.IsFinite(height));
+        Assert.True(height >= PanelPlacement.BarHeightDip);
+    }
 }
 
 public class RepeatGuardTests

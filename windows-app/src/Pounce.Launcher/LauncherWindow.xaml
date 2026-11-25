@@ -99,12 +99,15 @@
 
             <!-- The row's container: an optional section title, then the row with the selection background.
                  Not focusable, so the keyboard focus never leaves the search field; no hover effect, so the mouse
-                 never looks like it moved the selection. Clicks are handled in code (RowMouseDown/RowMouseUp). -->
+                 never looks like it moved the selection. Clicks are handled in code (RowMouseDown/RowMouseUp).
+                 Rows are pooled: one with nothing to show is collapsed (IsVisible), not removed. -->
             <Style x:Key="RowContainer" TargetType="ListBoxItem">
                 <Setter Property="Focusable" Value="False" />
                 <Setter Property="IsTabStop" Value="False" />
                 <Setter Property="Margin" Value="0,0,0,2" />
+                <Setter Property="Visibility" Value="{Binding IsVisible, Converter={StaticResource Visible}}" />
                 <Setter Property="AutomationProperties.Name" Value="{Binding AccessibleName}" />
+                <Setter Property="AutomationProperties.SizeOfSet" Value="{Binding SizeOfSet}" />
                 <EventSetter Event="PreviewMouseLeftButtonDown" Handler="RowMouseDown" />
                 <EventSetter Event="PreviewMouseLeftButtonUp" Handler="RowMouseUp" />
                 <Setter Property="Template">
@@ -130,8 +133,9 @@
         </ResourceDictionary>
     </Window.Resources>
 
-    <!-- The Canvas lets the content take its natural height; the window then follows it (Root_SizeChanged).
-         Its background paints the whole window: the tint over the acrylic, or the opaque fallback. -->
+    <!-- The Canvas lets the content take its natural height; the window then follows it (Root_SizeChanged), except
+         that it does not shrink while a search runs. Its background paints the whole window, including any band
+         below shorter content: the tint over the acrylic, or the opaque fallback. -->
     <Canvas x:Name="Host" Background="{DynamicResource PanelOpaqueBrush}">
         <StackPanel x:Name="Root" Width="680" SizeChanged="Root_SizeChanged">
             <Grid Height="56" Margin="18,0">
@@ -170,7 +174,7 @@
                           VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                           CanContentScroll="False">
                 <StackPanel Margin="6">
-                    <ListBox x:Name="ResultsList" ItemTemplate="{StaticResource RowTemplate}"
+                    <views:ResultsListBox x:Name="ResultsList" ItemTemplate="{StaticResource RowTemplate}"
                              ItemContainerStyle="{StaticResource RowContainer}"
                              Focusable="False" IsTabStop="False" KeyboardNavigation.TabNavigation="None"
                              IsSynchronizedWithCurrentItem="False" SelectionMode="Single"
@@ -188,7 +192,7 @@
                                 <StackPanel />
                             </ItemsPanelTemplate>
                         </ListBox.ItemsPanel>
-                    </ListBox>
+                    </views:ResultsListBox>
                     <TextBlock x:Name="MessageText" Visibility="Collapsed" Padding="12" FontSize="13"
                                TextWrapping="Wrap" Foreground="{DynamicResource SecondaryTextBrush}" />
                 </StackPanel>
