@@ -60,11 +60,16 @@ public sealed class ShellActions : IShellActions
             {
                 FirstRun.EnsureSettings(new PounceHome(Path.GetDirectoryName(Path.GetFullPath(file))!));
             }
-            // Explicitly Notepad: .yml usually has no association, and Notepad is on every Windows.
-            var info = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "notepad.exe"))
+            // Explicitly Notepad: .yml usually has no association. Windows 11 lets the user remove Notepad; then the
+            // shell opens the file, offering "Open with" when nothing handles .yml.
+            string notepadExe = Path.Combine(Environment.SystemDirectory, "notepad.exe");
+            if (!File.Exists(notepadExe))
             {
-                UseShellExecute = false,
-            };
+                Log.Warn($"{notepadExe} is missing; opening {file} through the shell");
+                ShellOpen(file, errorDialog: true);
+                return;
+            }
+            var info = new ProcessStartInfo(notepadExe) { UseShellExecute = false };
             info.ArgumentList.Add(file);
             using Process? notepad = Process.Start(info);
         });
