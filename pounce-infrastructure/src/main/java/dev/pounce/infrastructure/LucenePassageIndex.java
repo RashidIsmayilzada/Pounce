@@ -361,8 +361,9 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
             return Optional.of(Path.of(key));
         } catch (InvalidPathException e) {
             if (unusablePaths.add(key)) {
-                LOG.log(System.Logger.Level.WARNING, "Forgetting a Document whose stored path cannot be used here: "
-                        + e.getMessage());
+                // Control characters (a NUL, say) are shown as '?', so the log stays readable text.
+                LOG.log(System.Logger.Level.WARNING, "Forgetting {0}: this system cannot use it as a path ({1})",
+                        key.replaceAll("\\p{Cntrl}", "?"), e.getReason());
             }
             return Optional.empty();
         }
