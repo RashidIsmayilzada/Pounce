@@ -120,6 +120,36 @@ class IndexAndSearchTest {
     }
 
     @Test
+    void index_files_indexed_by_an_older_version_are_forgotten() throws IOException {
+        write("pounce-data/index/segments.txt", "canary");
+        write("notes.md", "The canary rollout went fine.");
+        var index = LucenePassageIndex.inMemory();
+        TestEngine.over(List.of(folder), TestEngine.exclusionsFor(folder), new HashingEmbedder(), index)
+                .indexer().reconcile();
+
+        engine = TestEngine.over(List.of(folder), Exclusions.defaults(folder.resolve("no-home"), folder.resolve("pounce-data")),
+                new HashingEmbedder(), index);
+        engine.indexer().reconcile();
+
+        assertThat(engine.searcher().search(Query.of("canary"), Phase.FINAL))
+                .extracting(Result::path)
+                .containsExactly(folder.resolve("notes.md"));
+    }
+
+    @Test
+    void a_file_that_grows_past_the_size_limit_is_forgotten() throws IOException {
+        write("log.txt", "canary deploy log");
+        engine.indexer().reconcile();
+
+        try (var file = new java.io.RandomAccessFile(folder.resolve("log.txt").toFile(), "rw")) {
+            file.setLength(50L * 1024 * 1024 + 1);
+        }
+        engine.indexer().refresh(folder.resolve("log.txt"));
+
+        assertThat(engine.searcher().search(Query.of("canary"), Phase.FINAL)).isEmpty();
+    }
+
+    @Test
     void a_watched_folder_inside_a_hidden_folder_is_indexed_but_hidden_folders_inside_it_are_not() throws IOException {
         Path watched = folder.resolve(".local/notes");
         write(".local/notes/plan.md", "canary plan");

@@ -67,20 +67,21 @@ public final class Indexer {
         for (Path document : index.documents()) {
             // Re-check the disk: the file may have been created (and indexed by a live refresh) after the walk.
             // Documents in a folder that could not be read this time are kept: the folder is still there.
-            if (!onDisk.contains(document.toString()) && !isInside(document, unreadable)
-                    && !isStoredUnderItsRealPath(document)) {
+            if (!onDisk.contains(document.toString()) && !isInside(document, unreadable) && !belongs(document)) {
                 index.remove(document);
             }
         }
     }
 
     /**
-     * False when the file is gone, and when it is now reached under another spelling: on a case-insensitive disk
-     * (Windows, macOS) a rename that only changed letter case leaves the old path "existing".
+     * False when the file is gone, when it is now excluded, and when it is now reached under another spelling: on a
+     * case-insensitive disk (Windows, macOS) a rename that only changed letter case leaves the old path "existing".
      */
-    private static boolean isStoredUnderItsRealPath(Path document) {
+    private boolean belongs(Path document) {
         try {
-            return document.toRealPath().toString().equals(document.toString());
+            Path real = document.toRealPath();
+            return real.toString().equals(document.toString())
+                    && !exclusions.excludes(watchedFolderOf(real), real, Files.size(real));
         } catch (IOException gone) {
             return false;
         }
@@ -199,6 +200,9 @@ public final class Indexer {
             Path file = path.toRealPath();
             FileStamp stamp = new FileStamp(Files.size(file), Files.getLastModifiedTime(file).toMillis());
             if (exclusions.excludes(watchedFolder, file, stamp.size())) {
+                if (index.stamp(file).isPresent()) {
+                    index.remove(file);
+                }
                 return;
             }
             Optional<FileStamp> stored = index.stamp(file);
