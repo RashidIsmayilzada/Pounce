@@ -63,7 +63,7 @@ class EngineConfiguration {
     /** Live changes: created before the startup reconcile runs, so nothing saved during it is missed. */
     @Bean(destroyMethod = "close")
     FolderWatcher folderWatcher(PounceProperties properties, Exclusions exclusions, Indexer indexer) {
-        return FolderWatcher.start(properties.watchedFolders(), exclusions, indexer::refresh);
+        return FolderWatcher.start(properties.watchedFolders(), exclusions, indexer::refresh, indexer::reconcile);
     }
 
     /** Catch up with changes made while the Engine was not running, without delaying startup. */

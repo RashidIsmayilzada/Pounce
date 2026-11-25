@@ -42,7 +42,8 @@ class FolderWatcherTest {
         elsewhere = elsewhere.toRealPath();
         engine = TestEngine.over(folder);
         engine.indexer().reconcile();
-        watcher = FolderWatcher.start(List.of(folder), engine.exclusions(), engine.indexer()::refresh);
+        watcher = FolderWatcher.start(List.of(folder), engine.exclusions(), engine.indexer()::refresh,
+                engine.indexer()::reconcile);
     }
 
     @AfterEach
@@ -140,7 +141,7 @@ class FolderWatcherTest {
     private List<Path> restartRecording() {
         watcher.close();
         List<Path> reported = new CopyOnWriteArrayList<>();
-        watcher = FolderWatcher.start(List.of(folder), engine.exclusions(), reported::add);
+        watcher = FolderWatcher.start(List.of(folder), engine.exclusions(), reported::add, reported::add);
         return reported;
     }
 

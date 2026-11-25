@@ -58,30 +58,64 @@ public final class Indexer {
     public void reconcile() {
         // Keys are compared as text: on Windows, paths that differ only in letter case are equal.
         Set<String> onDisk = new HashSet<>();
-        List<Path> unreadable = new ArrayList<>();
+        List<Path> skipped = new ArrayList<>();
         for (WatchedFolder folder : folders) {
             Optional<Path> root = existingRoot(folder);
             if (root.isEmpty()) {
-                unreadable.add(lastKnownLocation(folder.path()));
+                skipped.add(lastKnownLocation(folder.path()));
                 continue;
             }
-            walk(root.get(), root.get(), file -> {
-                try {
-                    onDisk.add(file.toRealPath().toString());
-                    refreshFile(root.get(), file);
-                } catch (IOException | RuntimeException e) {
-                    LOG.log(System.Logger.Level.WARNING, "Could not index {0}: {1}", file, e.toString());
-                }
-            }, unreadable::add);
+            indexAll(root.get(), root.get(), onDisk, skipped);
         }
-        for (Path document : index.documents()) {
+        forgetGone(index.documents(), onDisk, skipped);
+        index.commit();
+    }
+
+    /**
+     * Make the Index agree with disk for everything beneath this folder, as {@link #reconcile()} does for every
+     * Watched Folder: unlike {@link #refresh}, which reads what is there, this also forgets the Documents beneath it
+     * whose files are gone. For when changes beneath it went unreported, as when the file watcher loses events.
+     * A folder that no longer exists is forgotten with everything that was beneath it.
+     */
+    public void reconcile(Path folder) {
+        Path real;
+        try {
+            real = folder.toRealPath();
+        } catch (IOException gone) {
+            refresh(folder);
+            return;
+        }
+        if (!Files.isDirectory(real)) {
+            refresh(real);
+            return;
+        }
+        Set<String> onDisk = new HashSet<>();
+        List<Path> skipped = new ArrayList<>();
+        indexAll(watchedFolderOf(real), real, onDisk, skipped);
+        forgetGone(index.documents().stream().filter(document -> document.startsWith(real)).toList(), onDisk, skipped);
+    }
+
+    /** Indexes every file beneath {@code start}, noting each file's real path and each folder it could not read. */
+    private void indexAll(Path watchedFolder, Path start, Set<String> onDisk, List<Path> unreadable) {
+        walk(watchedFolder, start, file -> {
+            try {
+                onDisk.add(file.toRealPath().toString());
+                refreshFile(watchedFolder, file);
+            } catch (IOException | RuntimeException e) {
+                LOG.log(System.Logger.Level.WARNING, "Could not index {0}: {1}", file, e.toString());
+            }
+        }, unreadable::add);
+    }
+
+    /** Removes those of these Documents that were not found on disk, except the ones in a folder that was skipped. */
+    private void forgetGone(List<Path> documents, Set<String> onDisk, List<Path> skipped) {
+        for (Path document : documents) {
             // Re-check the disk: the file may have been created (and indexed by a live refresh) after the walk.
             // Documents in a folder that could not be read this time are kept: the folder is still there.
-            if (!onDisk.contains(document.toString()) && !isInside(document, unreadable) && !belongs(document)) {
+            if (!onDisk.contains(document.toString()) && !isInside(document, skipped) && !belongs(document)) {
                 index.remove(document);
             }
         }
-        index.commit();
     }
 
     /**

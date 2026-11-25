@@ -414,6 +414,48 @@ class IndexAndSearchTest {
                 .containsExactly(folder.resolve("keep.md"));
     }
 
+    /** What the file watcher asks for when the system dropped its events (a sync burst, an unzip, a checkout). */
+    @Test
+    void catching_up_on_a_folder_after_lost_events_forgets_files_deleted_meanwhile() throws IOException {
+        write("project/notes.md", "canary one");
+        write("project/deep/plan.md", "canary two");
+        write("keep.md", "canary three");
+        engine.indexer().reconcile();
+
+        Files.delete(folder.resolve("project/notes.md"));
+        Files.move(folder.resolve("project/deep/plan.md"), folder.resolve("project/deep/renamed.md"));
+        write("project/new.md", "canary four");
+        engine.indexer().reconcile(folder);
+
+        assertThat(fileNamesFound("canary")).containsExactlyInAnyOrder("renamed.md", "new.md", "keep.md");
+    }
+
+    @Test
+    void catching_up_on_a_folder_leaves_documents_outside_it_alone() throws IOException {
+        write("project/notes.md", "canary one");
+        write("other/plan.md", "canary two");
+        engine.indexer().reconcile();
+
+        Files.delete(folder.resolve("project/notes.md"));
+        Files.delete(folder.resolve("other/plan.md"));
+        engine.indexer().reconcile(folder.resolve("project"));
+
+        assertThat(fileNamesFound("canary")).containsExactly("plan.md");
+    }
+
+    @Test
+    void catching_up_on_a_folder_that_is_gone_forgets_everything_in_it() throws IOException {
+        write("project/notes.md", "canary one");
+        write("keep.md", "canary two");
+        engine.indexer().reconcile();
+
+        Files.delete(folder.resolve("project/notes.md"));
+        Files.delete(folder.resolve("project"));
+        engine.indexer().reconcile(folder.resolve("project"));
+
+        assertThat(fileNamesFound("canary")).containsExactly("keep.md");
+    }
+
     @Test
     void a_folder_moved_in_has_every_file_inside_it_indexed() throws IOException {
         engine.indexer().reconcile();

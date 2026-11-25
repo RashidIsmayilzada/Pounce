@@ -52,27 +52,37 @@ public final class FolderWatcher implements AutoCloseable {
     private final List<Path> roots;
     private final Exclusions exclusions;
     private final Consumer<Path> onChange;
+    private final Consumer<Path> onEventsLost;
     private final ScheduledExecutorService settle;
-    private final Map<Path, ScheduledFuture<?>> pending = new ConcurrentHashMap<>();
+    private final Map<Path, ScheduledFuture<?>> pendingChanges = new ConcurrentHashMap<>();
+    private final Map<Path, ScheduledFuture<?>> pendingCatchUps = new ConcurrentHashMap<>();
     /** Released once the watcher has subscribed to file events, or has failed to; changes before that are missed. */
     private final CountDownLatch listening = new CountDownLatch(1);
     private volatile boolean closed;
     /** Null when watching could not start. */
     private volatile DirectoryWatcher watcher;
 
-    private FolderWatcher(List<Path> roots, Exclusions exclusions, Consumer<Path> onChange) {
+    private FolderWatcher(List<Path> roots, Exclusions exclusions, Consumer<Path> onChange,
+                          Consumer<Path> onEventsLost) {
         this.roots = roots;
         this.exclusions = exclusions;
         this.onChange = onChange;
+        this.onEventsLost = onEventsLost;
         this.settle = Executors.newSingleThreadScheduledExecutor(Thread.ofPlatform().name("watch-settle").daemon().factory());
     }
 
     /**
      * Starts watching the folders that exist; {@code onChange} receives every changed path, file or folder, outside
      * the excluded folders. Returns once file events are flowing, so a change made right after is never lost.
+     * <p>
+     * When the system drops events (its buffer overflowed: on Windows one 16 KB buffer serves a whole Watched Folder,
+     * so a OneDrive sync, an unzip or a {@code git checkout} can overflow it), {@code onEventsLost} receives that
+     * Watched Folder instead, to bring it up to date, deletions included. It runs on the same thread as the changes,
+     * never on the thread that receives events, and repeated losses while it waits or runs lead to one more call.
      */
-    public static FolderWatcher start(List<Path> folders, Exclusions exclusions, Consumer<Path> onChange) {
-        var folderWatcher = new FolderWatcher(realFolders(folders), exclusions, onChange);
+    public static FolderWatcher start(List<Path> folders, Exclusions exclusions, Consumer<Path> onChange,
+                                      Consumer<Path> onEventsLost) {
+        var folderWatcher = new FolderWatcher(realFolders(folders), exclusions, onChange, onEventsLost);
         folderWatcher.listen();
         return folderWatcher;
     }
@@ -143,8 +153,9 @@ public final class FolderWatcher implements AutoCloseable {
     private void onEvent(DirectoryChangeEvent event) {
         Path root = event.rootPath();
         if (event.eventType() == EventType.OVERFLOW) {
-            // Events were lost: refresh the whole watched folder.
-            schedule(root);
+            // Events were lost, deletions among them: bring the whole Watched Folder up to date.
+            LOG.log(System.Logger.Level.INFO, "Missed some file changes in {0}; catching up", root);
+            schedule(root, pendingCatchUps, onEventsLost);
             return;
         }
         Path changed = event.path();
@@ -155,7 +166,7 @@ public final class FolderWatcher implements AutoCloseable {
         if (event.eventType() == EventType.MODIFY && isFolder) {
             return;
         }
-        schedule(changed);
+        schedule(changed, pendingChanges, onChange);
     }
 
     private boolean isExcluded(Path root, Path changed, boolean isDirectory) {
@@ -164,19 +175,23 @@ public final class FolderWatcher implements AutoCloseable {
                 || isDirectory && exclusions.excludesFolder(root, changed);
     }
 
-    private void schedule(Path changed) {
+    /**
+     * Reports the path to {@code action} once it has been quiet for {@link #QUIET}, on the settle thread. A path
+     * already waiting is reported once; one being reported right now is reported again after.
+     */
+    private void schedule(Path changed, Map<Path, ScheduledFuture<?>> pending, Consumer<Path> action) {
         pending.compute(changed, (path, previous) -> {
             if (previous != null) {
                 previous.cancel(false);
             }
-            return settle.schedule(() -> report(path), QUIET.toMillis(), TimeUnit.MILLISECONDS);
+            return settle.schedule(() -> report(path, pending, action), QUIET.toMillis(), TimeUnit.MILLISECONDS);
         });
     }
 
-    private void report(Path path) {
+    private void report(Path path, Map<Path, ScheduledFuture<?>> pending, Consumer<Path> action) {
         pending.remove(path);
         try {
-            onChange.accept(path);
+            action.accept(path);
         } catch (RuntimeException e) {
             LOG.log(System.Logger.Level.WARNING, "Could not refresh " + path, e);
         }
