@@ -28,7 +28,8 @@ namespace Pounce.Launcher;
 /// them until the Final Results arrive. Once the search is final the window fits its content.</para>
 /// <para>Look: a framed window whose frame the content covers (WindowChrome), so DWM gives it a shadow, rounded corners
 /// and, on Windows 11 22H2 and later, the acrylic backdrop under a translucent tint. Anywhere the backdrop cannot be
-/// applied (Windows 10, Windows 11 21H2, a DWM failure), the content paints an opaque themed background instead,
+/// applied or might come out black (Windows 10, Windows 11 21H2, a DWM failure, software rendering, Remote Desktop),
+/// the content paints an opaque themed background instead,
 /// so the panel is never black or see-through.</para>
 /// <para>Focus: the panel hides when it loses the focus to another program, after opening an item, and on Esc.</para>
 /// <para>Hiding clears the search first and hides one frame later. A hidden window keeps its last frame, and Windows
@@ -263,15 +264,33 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
         // Before the backdrop, so the material starts in the right theme.
         _ = WindowNative.SetDarkFrame(hwnd, theme is { Light: false });
 
-        backdrop = WindowNative.TryApplyAcrylic(hwnd, out string detail);
+        // The acrylic path needs WPF to present with alpha, which hardware rendering does. Under software rendering
+        // (render tier 0: no usable GPU, or rendering forced to software) and over Remote Desktop, the transparent
+        // background may come out black instead, so those take the opaque path without asking DWM.
+        string detail;
+        if (RenderCapability.Tier >> 16 == 0)
+        {
+            backdrop = false;
+            detail = "software rendering (render tier 0)";
+        }
+        else if (SystemParameters.IsRemoteSession)
+        {
+            backdrop = false;
+            detail = "Remote Desktop session";
+        }
+        else
+        {
+            backdrop = WindowNative.TryApplyAcrylic(hwnd, out detail);
+        }
         if (backdrop && source?.CompositionTarget is { } target)
         {
             // WPF must leave the pixels it does not paint transparent, or the backdrop would be covered in black.
             target.BackgroundColor = Colors.Transparent;
         }
-        else
+        else if (backdrop)
         {
             backdrop = false;
+            detail = "no composition target";
         }
         // Fallback: an opaque background in the theme's colour over the whole window, and the same colour for
         // pixels WPF has not painted yet (the strip a growing window gains before the next frame), which would
