@@ -18,8 +18,9 @@ namespace Pounce.Launcher;
 /// The search panel, like Spotlight: a search field, then matching applications, then files with their passage.
 /// </summary>
 /// <remarks>
-/// <para>Speed: the window, its HWND and its visual tree are built once at startup and shown once off-screen (so
-/// fonts, templates and the render target exist before the first real show); afterwards it is only shown and hidden.
+/// <para>Speed: the window, its HWND and its visual tree are built once at startup and shown once off-screen with two
+/// sample rows (so fonts, row templates, the icon pipeline and the render target exist before the first real show and
+/// the first keystroke, see <see cref="WarmUp"/>); afterwards it is only shown and hidden.
 /// Showing reads two registry values and moves the window; nothing else. Typing writes straight to
 /// <see cref="SearchModel.Query"/>, and result rows are pooled and updated in place (see <see cref="SyncRows"/>).</para>
 /// <para>Steadiness: each keystroke brings Early Results (often only a few) and then Final Results (often 8). While a
@@ -63,6 +64,7 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
     private IntPtr hwnd;
     private bool shown;
     private bool warmingUp;
+    private bool warmUpRows;
     private long shownAt;
     private SystemTheme? theme;
     private WindowNative.MonitorArea? monitor;
@@ -125,6 +127,14 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
             // Shown again within a frame of hiding: finish that first (it may have an item to open).
             FinishHide();
         }
+        if (warmUpRows)
+        {
+            // Asked for during the warm-up, while its sample rows are on the off-screen window: clear them and let
+            // that render first (Background runs after the render pass), so the sample rows are never on screen.
+            ClearWarmUpRows();
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(ShowPanel));
+            return;
+        }
         warmingUp = false;
         // Cheap (two GetWindowLong calls) and only writes when WPF has put a style back.
         _ = WindowNative.ApplyPanelStyles(hwnd);
@@ -157,6 +167,7 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
         }
         shown = false;
         warmingUp = false;
+        ClearWarmUpRows();
         StopSpinner();
         model.Query = "";
         ResultsScroller.ScrollToVerticalOffset(0);
@@ -300,6 +311,14 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
         Log.Info(backdrop ? "Panel: acrylic backdrop" : $"Panel: opaque background ({detail})");
     }
 
+    /// <summary>
+    /// Shows the window once off-screen, with one sample app row and one sample file row (a section title each, a
+    /// snippet with a highlight, an icon request), so the first keystroke does not pay for the row template, the
+    /// snippet view and the icon pipeline. The rows are put in the list directly: the model is not touched, so there
+    /// is no Query and no search. Three steps, each after the previous one rendered: show with the sample rows; clear
+    /// them; hide. The window is hidden only once it has rendered without them, so the frame a later show may
+    /// briefly reuse (see the remarks above) is the empty search bar.
+    /// </summary>
     private void WarmUp()
     {
         if (closed || shown || IsVisible)
@@ -307,6 +326,13 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
             return;
         }
         warmingUp = true;
+        if (visibleRows == 0)
+        {
+            warmUpRows = true;
+            SyncRows(WarmUpItems());
+            ResultsList.SelectedIndex = 0;
+            SyncResultsVisibility();
+        }
         _ = WindowNative.MoveTopmost(hwnd, OffScreen, OffScreen);
         ShowActivated = false;
         Show();
@@ -320,9 +346,40 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
         {
             return; // ShowPanel took over in the meantime.
         }
+        if (warmUpRows)
+        {
+            ClearWarmUpRows();
+            Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(FinishWarmUp));
+            return;
+        }
         warmingUp = false;
         Hide();
         ShowActivated = true;
+    }
+
+    /// <summary>Puts the list back to what the model says (nothing, at startup) once the warm-up rows have done their job.</summary>
+    private void ClearWarmUpRows()
+    {
+        if (!warmUpRows)
+        {
+            return;
+        }
+        warmUpRows = false;
+        SyncRows(model.Items);
+        SyncSelection();
+        SyncResultsVisibility();
+    }
+
+    private static SearchItem[] WarmUpItems()
+    {
+        string program = Environment.ProcessPath ?? System.IO.Path.Combine(AppContext.BaseDirectory, "Pounce.exe");
+        // Not a real file: its icon is the generic one of its type, the same any .txt Result gets.
+        string file = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "Pounce warm-up.txt");
+        return
+        [
+            new AppItem(new AppEntry("Pounce", program)),
+            new FileItem(new ResultItem(file, "Pounce warm-up.txt", new Snippet("A warm-up passage", [new Highlight(2, 9)]))),
+        ];
     }
 
     private IntPtr WndProc(IntPtr window, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -700,6 +757,10 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
         switch (e.PropertyName)
         {
             case nameof(SearchModel.Items):
+                if (warmUpRows)
+                {
+                    break; // The warm-up's sample rows stay until it is done; ClearWarmUpRows then catches up.
+                }
                 // The model keeps the selection inside the rows (and on the same item across an apps reload).
                 SyncRows(model.Items);
                 SyncSelection();
