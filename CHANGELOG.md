@@ -38,6 +38,7 @@ Pounce for Windows.
 - Renaming a file so that only its letter case changes no longer leaves two results for it.
 - When the system drops file events during a burst of changes (a large sync, unzip or checkout), files deleted or renamed meanwhile are forgotten at once instead of staying findable until the next start.
 - A named pipe in a Watched Folder no longer hangs indexing.
+- Reading the first PDF no longer stalls indexing while every font installed on the computer is read (minutes on some Windows systems), and no `.pdfbox.cache` file is left in your home folder.
 - A file that becomes excluded (for example by growing past 50 MB) is removed from the index.
 - A Watched Folder inside a hidden folder is indexed, and a Pounce home inside a Watched Folder is no longer indexed into itself.
 - A UTF-8 byte order mark is no longer part of a file's text, so a Markdown file's first heading counts as a heading.

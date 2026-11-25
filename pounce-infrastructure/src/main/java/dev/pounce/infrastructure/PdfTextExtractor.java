@@ -15,12 +15,14 @@ import java.util.Optional;
  * Reads the text layer of a PDF with PDFBox. Password-protected, broken or image-only PDFs have no text, so they
  * stay findable by file name only, and are not parsed again until they change: a broken file stays broken.
  * Only a PDF that cannot be opened at all (another program holds it, permissions) throws, so it is retried.
- * Pages are buffered in a temp file rather than the heap, to keep memory flat.
+ * Pages are buffered in a temp file rather than the heap, to keep memory flat. Fonts a PDF does not embed are never
+ * looked up among the installed ones ({@link BundledFontMapper}).
  */
 public final class PdfTextExtractor implements TextExtractor {
 
     @Override
     public Optional<String> extract(Path file) throws IOException {
+        BundledFontMapper.install();
         try (var input = new RandomAccessReadBufferedFile(file)) {
             return textOf(input);
         }
