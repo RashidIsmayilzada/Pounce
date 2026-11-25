@@ -1,0 +1,17 @@
+<ResourceDictionary x:Class="Pounce.Launcher.Themes.LightTheme"
+                    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- The panel's colours in the light app theme. DarkTheme.xaml has the same keys; the accent brushes
+         (AccentBrush, SelectionBrush) are set from the system accent colour in code.
+         Text colours are Windows 11's (TextFillColorPrimary/Secondary); backgrounds are its flyout colours. -->
+
+    <!-- Laid over the system acrylic backdrop: enough tint that text stays readable over any wallpaper. -->
+    <SolidColorBrush x:Key="PanelTintBrush" Color="#99F9F9F9" />
+    <!-- Used instead when there is no backdrop (Windows 10, Windows 11 before 22H2, or a DWM failure). -->
+    <SolidColorBrush x:Key="PanelOpaqueBrush" Color="#FFF9F9F9" />
+
+    <SolidColorBrush x:Key="PrimaryTextBrush" Color="#E4000000" />
+    <SolidColorBrush x:Key="SecondaryTextBrush" Color="#9E000000" />
+    <SolidColorBrush x:Key="DividerBrush" Color="#14000000" />
+    <SolidColorBrush x:Key="IconPlaceholderBrush" Color="#0F000000" />
+</ResourceDictionary>

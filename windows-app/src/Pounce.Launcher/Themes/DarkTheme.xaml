@@ -1,0 +1,13 @@
+<ResourceDictionary x:Class="Pounce.Launcher.Themes.DarkTheme"
+                    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- The panel's colours in the dark app theme. Same keys as LightTheme.xaml. -->
+
+    <SolidColorBrush x:Key="PanelTintBrush" Color="#992C2C2C" />
+    <SolidColorBrush x:Key="PanelOpaqueBrush" Color="#FF2C2C2C" />
+
+    <SolidColorBrush x:Key="PrimaryTextBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="SecondaryTextBrush" Color="#C5FFFFFF" />
+    <SolidColorBrush x:Key="DividerBrush" Color="#19FFFFFF" />
+    <SolidColorBrush x:Key="IconPlaceholderBrush" Color="#15FFFFFF" />
+</ResourceDictionary>
