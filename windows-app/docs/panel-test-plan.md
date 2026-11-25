@@ -1,8 +1,8 @@
 # Search panel: manual test plan
 
-The panel (`src/Pounce.Launcher/LauncherWindow.*`) was written and built on Linux and has not run yet. These are the checks to do on Windows, with what the right result looks like. Do them on Windows 11 22H2 or later first, then the fallback checks on Windows 10 or Windows 11 21H2 if you have one.
+The panel (`src/Pounce.Launcher/LauncherWindow.*`) was written and built on Linux; it had not run on Windows when this plan was written. These are the checks to do on Windows, with what the right result looks like. Do them on Windows 11 22H2 or later first, then the fallback checks on Windows 10 or Windows 11 21H2 if you have one.
 
-Before you start: run `Pounce.exe` with an Engine running (bundled, or `POUNCE_URL` pointing at one) and a few hundred indexed files. Keep `logs\launcher.log` in the Pounce home open; the panel writes one line at startup saying whether it got the acrylic backdrop (`Panel: acrylic backdrop`) or not (`Panel: opaque background (...)`, with the reason).
+Before you start: run `Pounce.exe` with an Engine running (the bundled one, or `POUNCE_URL` pointing at one) and a few hundred indexed files. [Testing a build on Windows](../README.md#testing-a-build-on-windows) says how to get there. Keep `%LOCALAPPDATA%\Pounce\logs\launcher.log` open; the panel writes one line at startup saying whether it got the acrylic backdrop (`Panel: acrylic backdrop`) or not (`Panel: opaque background (...)`, with the reason).
 
 ## 1. First show
 
@@ -24,7 +24,7 @@ Before you start: run `Pounce.exe` with an Engine running (bundled, or `POUNCE_U
 | Watch the rows as you pause typing. | When the refined results arrive a few ms later, rows change in place. No blink, no rows disappearing and coming back. |
 | Watch the right end of the search bar while typing normally. | No spinner. It only appears when a search takes longer than about 150 ms (stop the Engine's model, or search over a very large index, to see it). |
 | Type something that matches nothing. | "No results for “…”" in grey instead of rows. |
-| Stop the Engine and type. | A grey error message instead of rows; the panel keeps working. |
+| Stop the Engine and type. | A grey error message instead of file rows (matching apps still show); the panel keeps working. |
 | Type until there are 3 apps and 8 files, on a small screen (1366×768 at 100 %). | The panel grows downward only; its top edge stays put. It stops above the bottom of the screen and the results scroll. |
 | Delete everything with Backspace. | The panel shrinks back to the search bar. |
 
@@ -59,7 +59,7 @@ Before you start: run `Pounce.exe` with an Engine running (bundled, or `POUNCE_U
 | Press Alt+Space while the panel is open. | It hides. |
 | Hold Alt+Space down for two seconds. | The panel opens once and stays open; it does not flicker on and off. |
 | Right-click the tray icon while the panel is open. | The panel hides and the menu opens. |
-| Choose "Search" in the tray menu. | The panel opens and stays open with the caret in the field (it must not hide again as the menu closes). |
+| Choose "Search…" in the tray menu. | The panel opens and stays open with the caret in the field (it must not hide again as the menu closes). |
 | Start `Pounce.exe` a second time while Pounce runs. | The running Pounce shows its panel, in front, with the caret in the field. If it shows but without the focus, check `launcher.log` for "did not let the panel take the foreground"; clicking the panel must then give it the focus, and clicking another window must hide it within a quarter second. |
 | Open the panel while an app run as administrator (e.g. an elevated Terminal) is in front, and while a hung app ("Not Responding") is in front. | The panel shows; Pounce itself never freezes. If it has no focus, the row above applies. |
 | Lock the screen (Win+L) with the panel open, then unlock. | The panel is hidden. |
@@ -113,4 +113,4 @@ On Windows 10, or Windows 11 21H2 (build 22000), or over Remote Desktop:
 
 ## When something is wrong
 
-Note the Windows version (`winver`), the scaling of each monitor and what the log says, and send `logs\launcher.log` with the report.
+Note the Windows version (`winver`), the scaling of each monitor and what the log says, and send `launcher.log` (and `engine.log` if the Engine is involved) from `%LOCALAPPDATA%\Pounce\logs` with the report.
