@@ -12,7 +12,8 @@ Before you start: run `Pounce.exe` with an Engine running (the bundled one, or `
 | Look at it. | Rounded corners, a soft shadow, a thin border. Behind the panel the desktop shows through, blurred (acrylic), under a light or dark tint. A search glyph on the left, "Search apps and files" in grey. |
 | Type straight away, without clicking. | The letters go into the search field. The caret was already there. |
 | Check the taskbar and Alt+Tab while the panel is open. | No Pounce button in the taskbar, no Pounce entry in Alt+Tab. |
-| Press Alt+Space within two seconds of starting Pounce. | Still appears and takes the keys (it may take a little longer the very first time). |
+| Press Alt+Space within two seconds of starting Pounce. | Still appears and takes the keys (it may take a little longer the very first time). It never shows the warm-up's sample rows ("Pounce" with "Open", "Pounce warm-up.txt"), not even for a frame. |
+| Start Pounce, wait two seconds, open the panel and type one letter. | The first results come as fast as they do later on: no pause on the first letter while row templates or icons are set up (Pounce builds a sample row of each kind off-screen at startup). |
 
 ## 2. Typing and results
 
@@ -22,11 +23,13 @@ Before you start: run `Pounce.exe` with an Engine running (the bundled one, or `
 | Type a word that matches only files. | No section titles at all; just file rows. |
 | Watch a file row. | 32 px icon, the name in semibold, the path in small grey text (relative to your user folder, e.g. `Documents\notes\a.md`, cut off with "…" at the end when long), then up to two lines of the matching passage with the Query's words in bold, darker text. |
 | Watch the rows as you pause typing. | When the refined results arrive a few ms later, rows change in place. No blink, no rows disappearing and coming back. |
+| Type a word that matches many files letter by letter at normal speed, watching the panel's bottom edge (film it if you can). | The panel feels steady: while you type, its bottom edge stays put or moves down, and never jumps up toward the search bar and back between letters. The first results for each letter may be fewer than the rows before; then the rows of the previous letters disappear at once and an empty band of the panel's background shows below the remaining rows for a moment, until the full results fill it. Rows that belong to an earlier letter never stay on screen next to the new ones once the new results have started to arrive. |
+| Stop typing on a word with few results, after one with many. | Within a moment of the last results arriving, the panel shrinks to fit its rows. |
 | Watch the right end of the search bar while typing normally. | No spinner. It only appears when a search takes longer than about 150 ms (stop the Engine's model, or search over a very large index, to see it). |
 | Type something that matches nothing. | "No results for “…”" in grey instead of rows. |
 | Stop the Engine and type. | A grey error message instead of file rows (matching apps still show); the panel keeps working. |
 | Type until there are 3 apps and 8 files, on a small screen (1366×768 at 100 %). | The panel grows downward only; its top edge stays put. It stops above the bottom of the screen and the results scroll. |
-| Delete everything with Backspace. | The panel shrinks back to the search bar. |
+| Delete everything with Backspace. | The panel keeps its height while letters remain and shrinks back to the search bar once the field is empty. |
 
 ## 3. Selection and keyboard
 
@@ -60,7 +63,7 @@ Before you start: run `Pounce.exe` with an Engine running (the bundled one, or `
 | Hold Alt+Space down for two seconds. | The panel opens once and stays open; it does not flicker on and off. |
 | Right-click the tray icon while the panel is open. | The panel hides and the menu opens. |
 | Choose "Search…" in the tray menu. | The panel opens and stays open with the caret in the field (it must not hide again as the menu closes). |
-| Start `Pounce.exe` a second time while Pounce runs. | The running Pounce shows its panel, in front, with the caret in the field. If it shows but without the focus, check `launcher.log` for "did not let the panel take the foreground"; clicking the panel must then give it the focus, and clicking another window must hide it within a quarter second. |
+| Start `Pounce.exe` a second time while Pounce runs. | The running Pounce shows its panel, in front, with the caret in the field. If it shows but without the focus, check `launcher.log` for "did not let the panel take the foreground"; clicking the panel must then give it the focus, clicking another window must hide it within a quarter second, and Alt+Space must bring it to the front (not hide it). |
 | Open the panel while an app run as administrator (e.g. an elevated Terminal) is in front, and while a hung app ("Not Responding") is in front. | The panel shows; Pounce itself never freezes. If it has no focus, the row above applies. |
 | Lock the screen (Win+L) with the panel open, then unlock. | The panel is hidden. |
 
@@ -89,11 +92,13 @@ Best with two monitors at different scaling, e.g. a laptop at 150 % and an exter
 
 ## 8. Fallback look (no backdrop)
 
-On Windows 10, or Windows 11 21H2 (build 22000), or over Remote Desktop:
+On Windows 10, or Windows 11 21H2 (build 22000), over Remote Desktop, or with software rendering (a virtual machine without GPU acceleration):
 
 | Do | Right |
 |---|---|
-| Open the panel. | An opaque light or dark background, never black and never see-through. Square corners on Windows 10. `launcher.log` says `Panel: opaque background (...)` with the reason. |
+| Open the panel. | An opaque light or dark background, never black and never see-through. Square corners on Windows 10. `launcher.log` says `Panel: opaque background (...)` with the reason: the Windows build, `Remote Desktop session`, or `software rendering (render tier 0)`. |
+| Sign in over Remote Desktop, start Pounce there and open the panel. | Opaque, as above, with `Remote Desktop session` in the log. |
+| Start Pounce at the machine, then connect to the same session over Remote Desktop and open the panel. | Readable, not black. The look is chosen once at startup, so it stays acrylic here; if it comes out black or garbled, note it (restarting Pounce in the remote session must fix it). |
 | Do sections 2 to 5. | Everything works the same. |
 
 ## 9. Icons
@@ -110,6 +115,21 @@ On Windows 10, or Windows 11 21H2 (build 22000), or over Remote Desktop:
 |---|---|
 | Turn on Narrator and open the panel. | It reads "Search apps and files, edit". |
 | Type and press ↓. | Narrator can read the results list ("Results") and each row by name and location (Caps Lock + arrow keys to explore). |
+| Search for something with 8 results, then for something with 2, and explore the list with Narrator. | Narrator finds only the 2 rows and says "1 of 2", "2 of 2": never a row of the earlier search, never "of 8" or "of 11". |
+
+## 11. Failures
+
+`POUNCE_TEST_FAIL_STARTUP` makes the start fail on purpose at its very end, once the Engine, the tray icon, the hotkey and the single-instance lock all exist. Set it in a Command Prompt (`set POUNCE_TEST_FAIL_STARTUP=1`) and start `Pounce.exe` from there; quit any running Pounce first.
+
+| Do | Right |
+|---|---|
+| Start Pounce with `POUNCE_TEST_FAIL_STARTUP=1`. | Within a few seconds one message box, in front of other windows, with an error icon: "Pounce couldn't start.", the reason ("POUNCE_TEST_FAIL_STARTUP is set, so this start fails on purpose."), and the full path of `launcher.log`. No tray icon stays behind (hover over the tray to be sure). |
+| Close the message box, then check Task Manager. | No `Pounce.exe` and no Engine (`java.exe`/`javaw.exe` started by Pounce) left running. `echo %ERRORLEVEL%` after `start /wait Pounce.exe` says 1. |
+| Open `launcher.log`. | "Pounce couldn't start" with the exception and its stack trace, after a "Starting Pounce" line. |
+| Close that Command Prompt, start Pounce normally. | It starts as usual: the failed start left nothing that blocks it. |
+| Start Pounce with both `POUNCE_TEST_FAIL_STARTUP=1` and `POUNCE_NO_DIALOGS=1`. | No message box; the process exits with code 1 at once; the log has the failure and a "No dialog" line with what the box would have said. |
+| With Pounce running, run `Pounce.exe --quit`. | No message box ever, whatever happens; Pounce quits; the log has "--quit:" lines from the second process. |
+| With Pounce running, start `Pounce.exe` again. | The panel shows (section 5); the log has "Pounce is already running; asking it to show its panel". |
 
 ## When something is wrong
 
