@@ -179,6 +179,28 @@ public class IconCacheTests
     }
 
     [Fact]
+    public async Task A_worker_that_cannot_be_reached_gives_no_icon_and_the_key_can_be_asked_again()
+    {
+        var errors = new List<string>();
+        bool reachable = false;
+        var cache = new IconCache<string>(10, 10, work =>
+        {
+            if (!reachable)
+            {
+                throw new InvalidOperationException("no worker");
+            }
+            _worker.Schedule(work);
+        }, (key, e) => errors.Add(key + ": " + e.Message));
+
+        Assert.Null(await cache.GetAsync("a", Load("a")));
+        Assert.Equal(["a: no worker"], errors);
+        Assert.Equal(0, cache.Waiting);
+
+        reachable = true;
+        Assert.Equal("icon of a", await RunAndGet(cache.GetAsync("a", Load("a"))));
+    }
+
+    [Fact]
     public void The_least_recently_used_icon_is_evicted_when_full()
     {
         IconCache<string> cache = NewCache(capacity: 2);

@@ -32,7 +32,10 @@ public sealed class IconCache<T>
     /// Runs the given action once on the worker thread, later. It is called at most once per waiting load, so
     /// what it queues stays bounded too.
     /// </param>
-    /// <param name="onError">Told when a loader throws; that request then completes with null, which is not cached.</param>
+    /// <param name="onError">
+    /// Told when a loader or <paramref name="schedule"/> throws; that request then completes with null, which is not
+    /// cached.
+    /// </param>
     public IconCache(int capacity, int maxWaiting, Action<Action> schedule, Action<string, Exception>? onError = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(capacity, 1);
@@ -130,9 +133,51 @@ public sealed class IconCache<T>
         dropped?.TrySetResult(null);
         if (schedule)
         {
-            _schedule(RunNewest);
+            try
+            {
+                _schedule(RunNewest);
+            }
+            catch (Exception e)
+            {
+                Withdraw(key, request);
+                Report(key, e);
+            }
         }
         return request.Task;
+    }
+
+    /// <summary>Takes back a request the worker will never see, so its key is not stuck as "loading".</summary>
+    private void Withdraw(string key, TaskCompletionSource<T?> request)
+    {
+        lock (_gate)
+        {
+            _scheduled--;
+            for (var node = _waiting.First; node is not null; node = node.Next)
+            {
+                if (string.Equals(node.Value.Key, key, StringComparison.Ordinal))
+                {
+                    _waiting.Remove(node);
+                    break;
+                }
+            }
+            if (_loading.TryGetValue(key, out var current) && current == request)
+            {
+                _loading.Remove(key);
+            }
+        }
+        request.TrySetResult(null);
+    }
+
+    private void Report(string key, Exception e)
+    {
+        try
+        {
+            _onError?.Invoke(key, e);
+        }
+        catch (Exception)
+        {
+            // A failing error handler must not take the worker down.
+        }
     }
 
     /// <summary>Runs the newest waiting load. Called on the worker thread, once per scheduled action.</summary>
@@ -161,14 +206,7 @@ public sealed class IconCache<T>
         catch (Exception e)
         {
             ok = false;
-            try
-            {
-                _onError?.Invoke(key, e);
-            }
-            catch (Exception)
-            {
-                // A failing error handler must not take the worker down.
-            }
+            Report(key, e);
         }
 
         TaskCompletionSource<T?>? request;
