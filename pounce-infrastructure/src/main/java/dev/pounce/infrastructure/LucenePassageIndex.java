@@ -41,23 +41,33 @@ import org.apache.lucene.search.join.DiversifyingChildrenFloatKnnVectorQuery;
 import org.apache.lucene.search.join.QueryBitSetProducer;
 import org.apache.lucene.search.join.ScoreMode;
 import org.apache.lucene.search.join.ToParentBlockJoinQuery;
+import org.apache.lucene.store.AlreadyClosedException;
 import org.apache.lucene.store.ByteBuffersDirectory;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * The Index as one Lucene index. Each Document is a block: one child per Passage (text + int8-quantized vector),
  * then a parent carrying the path and file name. Every entry in a block carries the path, so a single delete-by-term
  * removes the whole Document.
+ * <p>
+ * Writes are searchable at once (near-real-time reader) and committed to disk {@link #COMMIT_DELAY} after the first
+ * write that is not on disk yet, so whatever happens to the process, at most that much indexing work is lost.
  */
 public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
 
@@ -69,6 +79,15 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
     private static final String SIZE = "size";
     private static final String MODIFIED = "modified";
     private static final int CANDIDATES = 20;
+    private static final System.Logger LOG = System.getLogger(LucenePassageIndex.class.getName());
+
+    /**
+     * How long a write may wait before it is committed. A commit fsyncs the new segment files, so committing every
+     * write would make each save in an editor cost several fsyncs; waiting gathers a burst of saves, or the writes
+     * of a long reconcile, into one commit per interval. A crash loses at most this much work, which the next start
+     * redoes (files whose stamps were not committed are read again). Searching never waits for a commit.
+     */
+    static final Duration COMMIT_DELAY = Duration.ofSeconds(10);
     private static final int RRF_K = 60;
 
     /**
@@ -92,8 +111,12 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
     private final IndexWriter writer;
     private final SearcherManager searchers;
     private final BitSetProducer parents = new QueryBitSetProducer(new TermQuery(new Term(KIND, "document")));
+    private final Executor committer;
+    private final AtomicBoolean commitScheduled = new AtomicBoolean();
+    private final Set<String> unusablePaths = ConcurrentHashMap.newKeySet();
 
-    private LucenePassageIndex(Directory directory) {
+    private LucenePassageIndex(Directory directory, Executor committer) {
+        this.committer = committer;
         try {
             var config = new IndexWriterConfig(analyzer);
             config.setCodec(new Lucene104Codec() {
@@ -123,16 +146,30 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
     }
 
     public static LucenePassageIndex inMemory() {
-        return new LucenePassageIndex(new ByteBuffersDirectory());
+        return new LucenePassageIndex(new ByteBuffersDirectory(), after(COMMIT_DELAY));
     }
 
     /** Opens (or creates) the Index stored in this folder. */
     public static LucenePassageIndex open(Path folder) {
+        return open(folder, COMMIT_DELAY);
+    }
+
+    static LucenePassageIndex open(Path folder, Duration commitDelay) {
+        return open(folder, after(commitDelay));
+    }
+
+    /** With the scheduled commits run by {@code committer}, which decides when; tests run them by hand. */
+    static LucenePassageIndex open(Path folder, Executor committer) {
         try {
-            return new LucenePassageIndex(FSDirectory.open(folder));
+            return new LucenePassageIndex(FSDirectory.open(folder), committer);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    private static Executor after(Duration delay) {
+        return CompletableFuture.delayedExecutor(delay.toMillis(), TimeUnit.MILLISECONDS,
+                task -> Thread.ofVirtual().name("index-commit").start(task));
     }
 
     @Override
@@ -181,17 +218,23 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
     }
 
     @Override
-    public Set<Path> documents() {
-        return withSearcher(searcher -> {
+    public List<Path> documents() {
+        List<String> keys = withSearcher(searcher -> {
             TopDocs all = searcher.search(new TermQuery(new Term(KIND, "document")),
                     Math.max(1, searcher.getIndexReader().maxDoc()));
             var stored = searcher.storedFields();
-            Set<Path> paths = new HashSet<>();
+            List<String> found = new ArrayList<>();
             for (ScoreDoc hit : all.scoreDocs) {
-                paths.add(Path.of(stored.document(hit.doc).get(PATH)));
+                found.add(stored.document(hit.doc).get(PATH));
             }
-            return paths;
+            return found;
         });
+        List<Path> paths = new ArrayList<>();
+        for (String key : keys) {
+            // A Document no path here can name cannot be checked against the disk, so it is removed right away.
+            pathOf(key).ifPresentOrElse(paths::add, () -> write(() -> writer.deleteDocuments(new Term(PATH, key))));
+        }
+        return paths;
     }
 
     @Override
@@ -210,6 +253,15 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
             return results(searcher, TopDocs.rrf(query.limit(), RRF_K, new TopDocs[]{keyword, semantic}),
                     textQuery(query));
         });
+    }
+
+    @Override
+    public void commit() {
+        try {
+            writer.commit();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     @Override
@@ -276,8 +328,11 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
         var stored = searcher.storedFields();
         List<Result> results = new ArrayList<>();
         for (ScoreDoc hit : top.scoreDocs) {
-            String path = stored.document(hit.doc).get(PATH);
-            results.add(new Result(Path.of(path), snippets.of(searcher, path, textQuery)));
+            String key = stored.document(hit.doc).get(PATH);
+            Optional<Path> path = pathOf(key);
+            if (path.isPresent()) {
+                results.add(new Result(path.get(), snippets.of(searcher, key, textQuery)));
+            }
         }
         return results;
     }
@@ -297,6 +352,23 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
         return words;
     }
 
+    /**
+     * The path stored under this key, if this system can read it: one stored by another system, or by a version
+     * that indexed names Windows cannot open (a name ending in a space), is not a path here. Logged once per key.
+     */
+    private Optional<Path> pathOf(String key) {
+        try {
+            return Optional.of(Path.of(key));
+        } catch (InvalidPathException e) {
+            if (unusablePaths.add(key)) {
+                // Control characters (a NUL, say) are shown as '?', so the log stays readable text.
+                LOG.log(System.Logger.Level.WARNING, "Forgetting {0}: this system cannot use it as a path ({1})",
+                        key.replaceAll("\\p{Cntrl}", "?"), e.getReason());
+            }
+            return Optional.empty();
+        }
+    }
+
     private static String fileNameWords(Path document) {
         return document.getFileName().toString().replaceAll("[-_.]", " ");
     }
@@ -307,6 +379,30 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
             searchers.maybeRefreshBlocking();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        }
+        commitSoon();
+    }
+
+    /** Schedules one commit {@link #COMMIT_DELAY} from now, unless one is already on its way. */
+    private void commitSoon() {
+        if (commitScheduled.compareAndSet(false, true)) {
+            committer.execute(() -> {
+                commitScheduled.set(false);
+                try {
+                    commit();
+                } catch (AlreadyClosedException e) {
+                    if (writer.getTragicException() == null) {
+                        // Closed meanwhile; closing commits.
+                        LOG.log(System.Logger.Level.DEBUG, "Scheduled commit skipped: the Index is closed");
+                    } else {
+                        LOG.log(System.Logger.Level.WARNING, "Could not save the Index to disk", e);
+                    }
+                } catch (RuntimeException e) {
+                    // For example antivirus or a backup tool holding an index file open. Logged once per failed
+                    // commit; the next write schedules another, and the next start redoes what was not saved.
+                    LOG.log(System.Logger.Level.WARNING, "Could not save the Index to disk; will try again", e);
+                }
+            });
         }
     }
 

@@ -1,6 +1,7 @@
 package dev.pounce.application;
 
 import dev.pounce.domain.Exclusions;
+import dev.pounce.domain.LinkedFolders;
 import dev.pounce.domain.Passage;
 import dev.pounce.domain.PassageSplitter;
 import dev.pounce.domain.TextFormat;
@@ -8,17 +9,28 @@ import dev.pounce.domain.WatchedFolder;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.FileSystems;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Stream;
+import java.util.function.Consumer;
 
 /** Keeps the Index in agreement with what is on disk in the Watched Folders. */
 public final class Indexer {
+
+    private static final System.Logger LOG = System.getLogger(Indexer.class.getName());
+    private static final boolean HAS_WINDOWS_ATTRIBUTES =
+            FileSystems.getDefault().supportedFileAttributeViews().contains("dos")
+                    && !FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
 
     private final List<WatchedFolder> folders;
     private final Exclusions exclusions;
@@ -37,33 +49,104 @@ public final class Indexer {
         this.index = index;
     }
 
-    /** Walk every Watched Folder and make the whole Index agree with disk. */
+    /**
+     * Walk every Watched Folder and make the whole Index agree with disk. A Watched Folder that does not exist, and
+     * a file or folder that cannot be read, is logged and skipped; the rest is still indexed. The Documents in what
+     * was skipped are kept: an unplugged disk or a network drive while offline comes back, and reading everything
+     * on it again would cost minutes.
+     */
     public void reconcile() {
-        Set<Path> onDisk = new HashSet<>();
+        // Keys are compared as text: on Windows, paths that differ only in letter case are equal.
+        Set<String> onDisk = new HashSet<>();
+        List<Path> skipped = new ArrayList<>();
         for (WatchedFolder folder : folders) {
-            try (Stream<Path> files = Files.walk(folder.path())) {
-                files.filter(Files::isRegularFile).forEach(file -> {
-                    refresh(file);
-                    onDisk.add(realPath(file));
-                });
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
+            Optional<Path> root = existingRoot(folder);
+            if (root.isEmpty()) {
+                skipped.add(lastKnownLocation(folder.path()));
+                continue;
             }
+            indexAll(root.get(), root.get(), onDisk, skipped);
         }
-        for (Path document : index.documents()) {
+        forgetGone(index.documents(), onDisk, skipped);
+        index.commit();
+    }
+
+    /**
+     * Make the Index agree with disk for everything beneath this folder, as {@link #reconcile()} does for every
+     * Watched Folder: unlike {@link #refresh}, which reads what is there, this also forgets the Documents beneath it
+     * whose files are gone. For when changes beneath it went unreported, as when the file watcher loses events.
+     * A folder that no longer exists is forgotten with everything that was beneath it.
+     */
+    public void reconcile(Path folder) {
+        Path real;
+        try {
+            real = folder.toRealPath();
+        } catch (IOException gone) {
+            refresh(folder);
+            return;
+        }
+        if (!Files.isDirectory(real)) {
+            refresh(real);
+            return;
+        }
+        Set<String> onDisk = new HashSet<>();
+        List<Path> skipped = new ArrayList<>();
+        indexAll(watchedFolderOf(real), real, onDisk, skipped);
+        forgetGone(index.documents().stream().filter(document -> document.startsWith(real)).toList(), onDisk, skipped);
+    }
+
+    /** Indexes every file beneath {@code start}, noting each file's real path and each folder it could not read. */
+    private void indexAll(Path watchedFolder, Path start, Set<String> onDisk, List<Path> unreadable) {
+        walk(watchedFolder, start, file -> {
+            try {
+                onDisk.add(file.toRealPath().toString());
+                refreshFile(watchedFolder, file);
+            } catch (IOException | RuntimeException e) {
+                LOG.log(System.Logger.Level.WARNING, "Could not index {0}: {1}", file, e.toString());
+            }
+        }, unreadable::add);
+    }
+
+    /** Removes those of these Documents that were not found on disk, except the ones in a folder that was skipped. */
+    private void forgetGone(List<Path> documents, Set<String> onDisk, List<Path> skipped) {
+        for (Path document : documents) {
             // Re-check the disk: the file may have been created (and indexed by a live refresh) after the walk.
-            if (!onDisk.contains(document) && !Files.exists(document)) {
+            // Documents in a folder that could not be read this time are kept: the folder is still there.
+            if (!onDisk.contains(document.toString()) && !isInside(document, skipped) && !belongs(document)) {
                 index.remove(document);
             }
         }
     }
 
-    private static Path realPath(Path file) {
+    /**
+     * False when the file is gone, when it is now excluded, and when it is now reached under another spelling: on a
+     * case-insensitive disk (Windows, macOS) a rename that only changed letter case leaves the old path "existing".
+     */
+    private boolean belongs(Path document) {
         try {
-            return file.toRealPath();
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+            Path real = document.toRealPath();
+            return real.toString().equals(document.toString())
+                    && !exclusions.excludes(watchedFolderOf(real), real, Files.size(real));
+        } catch (IOException gone) {
+            return false;
         }
+    }
+
+    private static Optional<Path> existingRoot(WatchedFolder folder) {
+        try {
+            Path root = folder.path().toRealPath();
+            if (Files.isDirectory(root)) {
+                return Optional.of(root);
+            }
+        } catch (IOException missing) {
+            // Logged below.
+        }
+        LOG.log(System.Logger.Level.INFO, "Watched Folder {0} does not exist; skipped", folder.path());
+        return Optional.empty();
+    }
+
+    private static boolean isInside(Path document, List<Path> folders) {
+        return folders.stream().anyMatch(document::startsWith);
     }
 
     /**
@@ -73,34 +156,121 @@ public final class Indexer {
      */
     public synchronized void refresh(Path path) {
         try {
+            Path lastKnown = lastKnownLocation(path);
             if (!Files.exists(path)) {
-                forget(lastKnownLocation(path));
-            } else if (Files.isDirectory(path)) {
-                try (Stream<Path> files = Files.walk(path)) {
-                    files.filter(Files::isRegularFile).forEach(this::refreshFile);
-                }
+                forget(lastKnown);
+                return;
+            }
+            Path real = path.toRealPath();
+            if (!real.toString().equals(lastKnown.toString())) {
+                // The same file under another spelling: on a case-insensitive disk (Windows, macOS) a rename that only
+                // changed letter case reports the old name, which still "exists". Forget what was stored under it.
+                forget(lastKnown);
+            }
+            if (Files.isDirectory(real)) {
+                Path watchedFolder = watchedFolderOf(real);
+                walk(watchedFolder, real, file -> {
+                    try {
+                        refreshFile(watchedFolder, file);
+                    } catch (RuntimeException e) {
+                        LOG.log(System.Logger.Level.WARNING, "Could not index {0}: {1}", file, e.toString());
+                    }
+                }, unreadable -> { });
             } else {
-                refreshFile(path);
+                refreshFile(watchedFolderOf(real), real);
             }
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
     }
 
+    /**
+     * Visits every file below {@code start} that can hold a Document ({@link #isDocumentFile}; a link to one counts,
+     * links to folders are not followed), without entering excluded folders or looping through Windows junctions
+     * ({@link LinkedFolders}). A file or folder that cannot be read is logged, reported to {@code onUnreadable} and
+     * skipped.
+     */
+    private void walk(Path watchedFolder, Path start, Consumer<Path> onFile, Consumer<Path> onUnreadable) {
+        try {
+            Files.walkFileTree(start, new SimpleFileVisitor<>() {
+                private final LinkedFolders links = new LinkedFolders();
+
+                @Override
+                public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                    if (exclusions.excludesFolder(watchedFolder, dir)) {
+                        return FileVisitResult.SKIP_SUBTREE;
+                    }
+                    // "Other": a Windows junction, mount point or OneDrive folder, which may lead elsewhere.
+                    if (attrs.isOther() && !links.mayEnter(dir)) {
+                        LOG.log(System.Logger.Level.INFO,
+                                "Skipped {0}: it leads into a folder above it, or to one already walked", dir);
+                        return FileVisitResult.SKIP_SUBTREE;
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                    if (attrs.isSymbolicLink() ? linksToDocumentFile(file) : isDocumentFile(attrs)) {
+                        onFile.accept(file);
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFileFailed(Path file, IOException e) {
+                    LOG.log(System.Logger.Level.INFO, "Skipped {0}: it cannot be read ({1})", file, e.toString());
+                    onUnreadable.accept(file);
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult postVisitDirectory(Path dir, IOException e) {
+                    if (e != null) {
+                        visitFileFailed(dir, e);
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /** Removes the Document stored under exactly this path, and every Document stored beneath it. */
     private void forget(Path gone) {
-        index.remove(gone);
+        String key = gone.toString();
+        String separator = gone.getFileSystem().getSeparator();
+        String beneath = key.endsWith(separator) ? key : key + separator;
         for (Path document : index.documents()) {
-            if (document.startsWith(gone)) {
+            String stored = document.toString();
+            if (stored.equals(key) || stored.startsWith(beneath)) {
                 index.remove(document);
             }
         }
     }
 
-    private void refreshFile(Path path) {
+    /** Calls are serialised with {@link #refresh}, so a live change and the reconcile never interleave on a file. */
+    private synchronized void refreshFile(Path watchedFolder, Path path) {
         try {
             Path file = path.toRealPath();
-            FileStamp stamp = new FileStamp(Files.size(file), Files.getLastModifiedTime(file).toMillis());
-            if (exclusions.excludes(file, stamp.size())) {
+            if (!canBeNamedAgain(file)) {
+                LOG.log(System.Logger.Level.INFO, "Skipped {0}: its name cannot be used to open it again", file);
+                return;
+            }
+            BasicFileAttributes attributes = Files.readAttributes(file, BasicFileAttributes.class);
+            if (!isDocumentFile(attributes)) {
+                LOG.log(System.Logger.Level.DEBUG, "Skipped {0}: not a file with content to read", file);
+                if (index.stamp(file).isPresent()) {
+                    index.remove(file);
+                }
+                return;
+            }
+            FileStamp stamp = new FileStamp(attributes.size(), attributes.lastModifiedTime().toMillis());
+            if (exclusions.excludes(watchedFolder, file, stamp.size())) {
+                if (index.stamp(file).isPresent()) {
+                    index.remove(file);
+                }
                 return;
             }
             Optional<FileStamp> stored = index.stamp(file);
@@ -109,7 +279,20 @@ public final class Indexer {
             if (stored.filter(s -> s.equals(stamp) || s.equals(FileStamp.UNKNOWN)).isPresent()) {
                 return;
             }
-            String text = extractor.extract(file).orElse("");
+            if (isCloudOnlyOrSystem(file)) {
+                // No stamp is stored, so once the file has been downloaded (its attributes change) it is read.
+                LOG.log(System.Logger.Level.DEBUG, "Skipped {0}: only in the cloud, or a system file", file);
+                return;
+            }
+            String text;
+            try {
+                text = extractor.extract(file).orElse("");
+            } catch (IOException e) {
+                // Not "no text": store nothing, so the next reconcile or change reads it again.
+                LOG.log(System.Logger.Level.INFO, "Could not read {0} for now ({1}); will try again",
+                        file, e.toString());
+                return;
+            }
             List<Passage> passages = splitter.split(text, formatOf(file));
             List<float[]> vectors = embedder.embedPassages(passages.stream().map(Passage::text).toList());
             List<EmbeddedPassage> embedded = new ArrayList<>();
@@ -122,14 +305,93 @@ public final class Indexer {
         }
     }
 
-    /** A deleted file has no real path any more; resolve its folder instead, which matches how it was stored. */
-    private static Path lastKnownLocation(Path deleted) throws IOException {
-        Path absolute = deleted.toAbsolutePath().normalize();
-        Path parent = absolute.getParent();
-        return parent != null && Files.exists(parent) ? parent.toRealPath().resolve(absolute.getFileName()) : absolute;
+    /**
+     * The real location of the Watched Folder this real path lies in (the innermost, if they nest). A path in none
+     * of them (reached through a link) is judged from the top of its file system, so every folder on it counts.
+     */
+    private Path watchedFolderOf(Path real) {
+        Path best = null;
+        for (WatchedFolder folder : folders) {
+            try {
+                Path root = folder.path().toRealPath();
+                if (real.startsWith(root) && (best == null || root.getNameCount() > best.getNameCount())) {
+                    best = root;
+                }
+            } catch (IOException missing) {
+                // A Watched Folder that does not exist contains nothing.
+            }
+        }
+        return best != null ? best : real.getRoot();
+    }
+
+    /**
+     * Whether a file with these attributes has content to read as a Document: a regular file, or on Windows a file
+     * that is a reparse point other than a link, which Java reports as "other" rather than regular. Every OneDrive
+     * file is one, even once downloaded (those only in the cloud are then left out by {@link #isCloudOnlyOrSystem}).
+     * On macOS and Linux "other" is a device, a socket or a named pipe, which must never be read: opening a named
+     * pipe waits for a writer, forever.
+     */
+    private static boolean isDocumentFile(BasicFileAttributes attributes) {
+        return attributes.isRegularFile()
+                || HAS_WINDOWS_ATTRIBUTES && attributes.isOther() && !attributes.isDirectory();
+    }
+
+    /** Whether this link leads to a file that can hold a Document; a broken link does not. */
+    private static boolean linksToDocumentFile(Path link) {
+        try {
+            return isDocumentFile(Files.readAttributes(link, BasicFileAttributes.class));
+        } catch (IOException broken) {
+            return false;
+        }
+    }
+
+    /**
+     * Reads the Windows file attributes, only where they are real: Linux emulates the {@code dos} view with extended
+     * attributes that no cloud client sets, so there (and wherever POSIX permissions exist) reading costs a system
+     * call for nothing.
+     */
+    private static boolean isCloudOnlyOrSystem(Path file) {
+        if (!HAS_WINDOWS_ATTRIBUTES) {
+            return false;
+        }
+        try {
+            return Exclusions.isCloudOnlyOrSystem((Integer) Files.getAttribute(file, "dos:attributes"));
+        } catch (IOException | RuntimeException unknown) {
+            return false;
+        }
+    }
+
+    /**
+     * Whether the path, stored as text, reads back as this file. On Windows a name ending in a space (which other
+     * tools, WSL among them, can create) is listed by the disk but rejected when parsed, so storing it would make
+     * the Document impossible to open, check or remove.
+     */
+    private static boolean canBeNamedAgain(Path file) {
+        try {
+            return file.getFileSystem().getPath(file.toString()).equals(file);
+        } catch (InvalidPathException e) {
+            return false;
+        }
+    }
+
+    /**
+     * A path that is gone has no real path any more; resolve the nearest folder above it that still exists instead,
+     * which matches how it was stored.
+     */
+    private static Path lastKnownLocation(Path gone) {
+        Path absolute = gone.toAbsolutePath().normalize();
+        for (Path above = absolute.getParent(); above != null; above = above.getParent()) {
+            try {
+                return above.toRealPath().resolve(above.relativize(absolute));
+            } catch (IOException goneToo) {
+                // Try the next folder up.
+            }
+        }
+        return absolute;
     }
 
     private static TextFormat formatOf(Path file) {
-        return file.getFileName().toString().toLowerCase().endsWith(".md") ? TextFormat.MARKDOWN : TextFormat.PLAIN;
+        boolean markdown = file.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".md");
+        return markdown ? TextFormat.MARKDOWN : TextFormat.PLAIN;
     }
 }

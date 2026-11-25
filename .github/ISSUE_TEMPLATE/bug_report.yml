@@ -10,7 +10,7 @@ body:
     attributes:
       label: What happened?
       description: What did you do, what did you expect, and what happened instead?
-      placeholder: I pressed ⌥Space, searched "tax return" and expected my PDF, but…
+      placeholder: I pressed the shortcut, searched "tax return" and expected my PDF, but…
     validations:
       required: true
   - type: textarea
@@ -31,15 +31,19 @@ body:
     validations:
       required: true
   - type: input
-    id: macos
+    id: system
     attributes:
-      label: macOS version and Mac
-      placeholder: macOS 26.5, MacBook Air M2 8 GB
+      label: Operating system and computer
+      description: The system and its version (on Windows, `winver` shows it), and the computer or its processor and memory
+      placeholder: macOS 26.5 on a MacBook Air M2 8 GB, or Windows 11 24H2 on an x64 laptop with 16 GB
     validations:
       required: true
   - type: textarea
     id: logs
     attributes:
-      label: Engine log (optional)
-      description: The last lines of `~/Library/Application Support/Pounce/logs/engine.log`. Check it for private paths first.
+      label: Logs (optional)
+      description: |
+        The last lines of the Engine log, and on Windows also of the Launcher log. Check them for private paths first.
+        - macOS: `~/Library/Application Support/Pounce/logs/engine.log`
+        - Windows: `%LOCALAPPDATA%\Pounce\logs\engine.log` and `%LOCALAPPDATA%\Pounce\logs\launcher.log`
       render: text

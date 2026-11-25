@@ -7,6 +7,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
@@ -61,6 +62,7 @@ class RankingTest {
                     # Budget review
                     The quarterly budget review moved to Thursday afternoon.""");
 
+    @TempDir
     static Path folder;
     static OnnxEmbedder embedder;
     static TestEngine engine;
@@ -69,7 +71,7 @@ class RankingTest {
     static void indexCorpus() throws IOException {
         Path modelDir = Path.of(System.getProperty("pounce.model.dir", "models/bge-small-en-v1.5"));
         assumeTrue(Files.exists(modelDir.resolve("model.onnx")), "model missing: run scripts/fetch-model.sh");
-        folder = Files.createTempDirectory("pounce-ranking").toRealPath();
+        folder = folder.toRealPath();
         for (var corpus : java.util.List.of(CORPUS, FILLER)) {
             for (var file : corpus.entrySet()) {
                 Files.writeString(folder.resolve(file.getKey()), file.getValue());

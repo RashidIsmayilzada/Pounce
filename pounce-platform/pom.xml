@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent><groupId>dev.pounce</groupId><artifactId>pounce</artifactId><version>0.1.0-SNAPSHOT</version></parent>
+  <artifactId>pounce-platform</artifactId>
+  <description>Where Pounce keeps its data and which folders it watches by default, per operating system. Shared by the Engine and the CLI; not an Engine layer.</description>
+  <properties>
+    <!-- The CLI uses this module and runs on any JDK 21+. -->
+    <maven.compiler.release>21</maven.compiler.release>
+  </properties>
+  <dependencies>
+  </dependencies>
+</project>

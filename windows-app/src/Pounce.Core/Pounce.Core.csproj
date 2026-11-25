@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Testable logic of the Windows Launcher. Plain net10.0, no Windows-only APIs, so its tests run anywhere. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Pounce.Core</RootNamespace>
+    <!-- The shell is written against this API without reading the code: every public member needs a doc comment
+         (a missing one is a warning, so an error), and the comments show up in the editor. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Pounce.Core.Tests" />
+  </ItemGroup>
+
+</Project>

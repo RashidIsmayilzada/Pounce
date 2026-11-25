@@ -11,6 +11,7 @@ import dev.pounce.infrastructure.FolderWatcher;
 import dev.pounce.infrastructure.LucenePassageIndex;
 import dev.pounce.infrastructure.OnnxEmbedder;
 import dev.pounce.infrastructure.FileTypeTextExtractor;
+import dev.pounce.platform.PounceHome;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -28,12 +29,12 @@ class EngineConfiguration {
 
     @Bean
     Credentials credentials(PounceProperties properties) {
-        return Credentials.in(properties.home());
+        return Credentials.in(new PounceHome(properties.home()));
     }
 
     @Bean(destroyMethod = "close")
     LucenePassageIndex passageIndex(PounceProperties properties) {
-        return LucenePassageIndex.open(properties.home().resolve("index"));
+        return LucenePassageIndex.open(new PounceHome(properties.home()).index());
     }
 
     @Bean(destroyMethod = "close")
@@ -42,10 +43,15 @@ class EngineConfiguration {
     }
 
     @Bean
-    Indexer indexer(PounceProperties properties, Embedder embedder, PassageIndex index) {
+    Exclusions exclusions(PounceProperties properties) {
+        return Exclusions.defaults(Path.of(System.getProperty("user.home")), properties.home());
+    }
+
+    @Bean
+    Indexer indexer(PounceProperties properties, Exclusions exclusions, Embedder embedder, PassageIndex index) {
         return new Indexer(
                 properties.watchedFolders().stream().map(WatchedFolder::new).toList(),
-                Exclusions.defaults(Path.of(System.getProperty("user.home"))),
+                exclusions,
                 new FileTypeTextExtractor(), new PassageSplitter(), embedder, index);
     }
 
@@ -56,8 +62,8 @@ class EngineConfiguration {
 
     /** Live changes: created before the startup reconcile runs, so nothing saved during it is missed. */
     @Bean(destroyMethod = "close")
-    FolderWatcher folderWatcher(PounceProperties properties, Indexer indexer) {
-        return FolderWatcher.start(properties.watchedFolders(), indexer::refresh);
+    FolderWatcher folderWatcher(PounceProperties properties, Exclusions exclusions, Indexer indexer) {
+        return FolderWatcher.start(properties.watchedFolders(), exclusions, indexer::refresh, indexer::reconcile);
     }
 
     /** Catch up with changes made while the Engine was not running, without delaying startup. */

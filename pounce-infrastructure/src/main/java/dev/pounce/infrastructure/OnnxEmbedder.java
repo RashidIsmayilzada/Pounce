@@ -1,7 +1,5 @@
 package dev.pounce.infrastructure;
 
-import ai.djl.huggingface.tokenizers.Encoding;
-import ai.djl.huggingface.tokenizers.HuggingFaceTokenizer;
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
@@ -20,7 +18,8 @@ import java.util.Map;
 /**
  * Embeds text with bge-small-en-v1.5 (int8 ONNX) on the CPU: the CLS token's hidden state, L2-normalised.
  * Queries get the model's retrieval instruction prefix; Passages are embedded as they are.
- * Input longer than the model's 512 tokens is truncated.
+ * Input longer than the model's 512 tokens is truncated. Tokenizing is pure Java ({@link BertWordPieceTokenizer}),
+ * so ONNX Runtime is the only native library involved.
  */
 public final class OnnxEmbedder implements Embedder, AutoCloseable {
 
@@ -29,9 +28,9 @@ public final class OnnxEmbedder implements Embedder, AutoCloseable {
 
     private final OrtEnvironment environment;
     private final OrtSession session;
-    private final HuggingFaceTokenizer tokenizer;
+    private final BertWordPieceTokenizer tokenizer;
 
-    private OnnxEmbedder(OrtEnvironment environment, OrtSession session, HuggingFaceTokenizer tokenizer) {
+    private OnnxEmbedder(OrtEnvironment environment, OrtSession session, BertWordPieceTokenizer tokenizer) {
         this.environment = environment;
         this.session = session;
         this.tokenizer = tokenizer;
@@ -40,11 +39,7 @@ public final class OnnxEmbedder implements Embedder, AutoCloseable {
     /** Loads {@code model.onnx} and {@code tokenizer.json} from the given folder. */
     public static OnnxEmbedder load(Path modelDir) {
         try {
-            var tokenizer = HuggingFaceTokenizer.builder()
-                    .optTokenizerPath(modelDir.resolve("tokenizer.json"))
-                    .optMaxLength(MAX_TOKENS)
-                    .optTruncation(true)
-                    .build();
+            var tokenizer = BertWordPieceTokenizer.load(modelDir.resolve("tokenizer.json"));
             var environment = OrtEnvironment.getEnvironment();
             var options = new OrtSession.SessionOptions();
             options.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT);
@@ -74,13 +69,17 @@ public final class OnnxEmbedder implements Embedder, AutoCloseable {
     }
 
     private float[] embed(String text) {
-        Encoding encoding = tokenizer.encode(text);
-        long[] shape = {1, encoding.getIds().length};
+        return embed(tokenizer.encode(text, MAX_TOKENS));
+    }
+
+    /** Runs the model on one already tokenized text. */
+    float[] embed(BertWordPieceTokenizer.Encoding encoding) {
+        long[] shape = {1, encoding.ids().length};
         Map<String, OnnxTensor> inputs = new HashMap<>();
         try {
-            inputs.put("input_ids", tensor(encoding.getIds(), shape));
-            inputs.put("attention_mask", tensor(encoding.getAttentionMask(), shape));
-            inputs.put("token_type_ids", tensor(encoding.getTypeIds(), shape));
+            inputs.put("input_ids", tensor(encoding.ids(), shape));
+            inputs.put("attention_mask", tensor(encoding.attentionMask(), shape));
+            inputs.put("token_type_ids", tensor(encoding.typeIds(), shape));
             try (OrtSession.Result output = session.run(inputs)) {
                 float[][][] hidden = (float[][][]) output.get(0).getValue();
                 return normalised(hidden[0][0]);
@@ -115,8 +114,6 @@ public final class OnnxEmbedder implements Embedder, AutoCloseable {
             session.close();
         } catch (OrtException e) {
             throw new IllegalStateException(e);
-        } finally {
-            tokenizer.close();
         }
     }
 }

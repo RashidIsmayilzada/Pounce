@@ -8,9 +8,10 @@
   <version>0.1.0-SNAPSHOT</version>
   <packaging>pom</packaging>
   <name>Pounce</name>
-  <description>Private, on-device semantic search for macOS</description>
+  <description>Private, on-device semantic search for macOS, Windows and Linux</description>
 
   <modules>
+    <module>pounce-platform</module>
     <module>pounce-domain</module>
     <module>pounce-application</module>
     <module>pounce-infrastructure</module>
@@ -26,6 +27,7 @@
     <onnxruntime.version>1.32.0</onnxruntime.version>
     <djl.version>0.40.0</djl.version>
     <archunit.version>1.4.1</archunit.version>
+    <surefire.version>3.5.4</surefire.version>
   </properties>
 
   <dependencyManagement>
@@ -37,6 +39,7 @@
         <type>pom</type>
         <scope>import</scope>
       </dependency>
+      <dependency><groupId>dev.pounce</groupId><artifactId>pounce-platform</artifactId><version>${project.version}</version></dependency>
       <dependency><groupId>dev.pounce</groupId><artifactId>pounce-domain</artifactId><version>${project.version}</version></dependency>
       <dependency><groupId>dev.pounce</groupId><artifactId>pounce-application</artifactId><version>${project.version}</version></dependency>
       <dependency><groupId>dev.pounce</groupId><artifactId>pounce-infrastructure</artifactId><version>${project.version}</version></dependency>
@@ -61,6 +64,7 @@
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-surefire-plugin</artifactId>
+          <version>${surefire.version}</version>
           <configuration>
             <!-- Lucene SIMD + quiet native-access warnings (JEP 472); see docs/research. -->
             <argLine>--add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED</argLine>

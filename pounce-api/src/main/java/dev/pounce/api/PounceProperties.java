@@ -10,10 +10,14 @@ import java.util.List;
  * Engine settings ({@code pounce.*}).
  *
  * @param home           where the Index, the signing key and the bootstrap secret live
- * @param watchedFolders the Watched Folders
+ * @param watchedFolders the Watched Folders; none when none of the usual ones exist and the user chose none
  * @param modelDir       folder holding {@code model.onnx} and {@code tokenizer.json}
  * @param tokenLifetime  how long a JWT stays valid
  */
 @ConfigurationProperties("pounce")
 public record PounceProperties(Path home, List<Path> watchedFolders, Path modelDir, Duration tokenLifetime) {
+
+    public PounceProperties {
+        watchedFolders = watchedFolders == null ? List.of() : List.copyOf(watchedFolders);
+    }
 }

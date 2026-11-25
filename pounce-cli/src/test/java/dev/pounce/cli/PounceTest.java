@@ -1,10 +1,12 @@
 package dev.pounce.cli;
 
 import com.sun.net.httpserver.HttpServer;
+import dev.pounce.platform.PounceHome;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -15,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -25,6 +28,7 @@ class PounceTest {
 
     static final String SECRET = "the-bootstrap-secret";
     static final String TOKEN = "header.payload.signature";
+    static final JsonMapper JSON = JsonMapper.builder().build();
 
     @TempDir
     Path home;
@@ -39,8 +43,8 @@ class PounceTest {
         engine = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         engine.createContext("/auth/token", exchange -> {
             String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-            boolean ok = body.contains("\"" + SECRET + "\"");
-            byte[] reply = ok ? ("{\"token\":\"" + TOKEN + "\",\"expiresInSeconds\":900}").getBytes() : new byte[0];
+            boolean ok = SECRET.equals(JSON.readTree(body).path("secret").asString());
+            byte[] reply = ok ? JSON.writeValueAsBytes(Map.of("token", TOKEN, "expiresInSeconds", 900)) : new byte[0];
             exchange.sendResponseHeaders(ok ? 200 : 401, ok ? reply.length : -1);
             exchange.getResponseBody().write(reply);
             exchange.close();
@@ -52,7 +56,8 @@ class PounceTest {
                 return;
             }
             searches.add(URLDecoder.decode(exchange.getRequestURI().getRawQuery(), StandardCharsets.UTF_8));
-            byte[] stream = ("event:early\ndata:" + earlyJson + "\n\nevent:final\ndata:" + finalJson + "\n\n").getBytes();
+            byte[] stream = ("event:early\ndata:" + earlyJson + "\n\nevent:final\ndata:" + finalJson + "\n\n")
+                    .getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
             exchange.sendResponseHeaders(200, stream.length);
             exchange.getResponseBody().write(stream);
@@ -68,14 +73,14 @@ class PounceTest {
 
     @Test
     void prints_the_final_results_with_their_snippets() {
-        earlyJson = "[" + result("/notes/old-guess.md", "An early guess.", List.of()) + "]";
-        finalJson = "[" + result("/notes/rollout.md", "The canary rollout went fine.", List.of(4, 10)) + ","
-                + result("/notes/runbook.md", "Shift traffic slowly.", List.of()) + "]";
+        earlyJson = json(result("/notes/old-guess.md", "An early guess."));
+        finalJson = json(result("/notes/rollout.md", "The canary rollout went fine.", 4, 10),
+                result("/notes/runbook.md", "Shift traffic slowly."));
 
         Run run = pounce("--color=never", "canary");
 
         assertThat(run.exitCode).isZero();
-        assertThat(run.out).isEqualTo("""
+        assertThat(run.out).isEqualToNormalizingNewlines("""
                 rollout.md  /notes/rollout.md
                   The canary rollout went fine.
                 runbook.md  /notes/runbook.md
@@ -84,12 +89,33 @@ class PounceTest {
     }
 
     @Test
+    void prints_a_windows_path_unchanged() {
+        finalJson = json(result("C:\\Users\\me\\notes.md", "Notes on \"quoting\"."));
+
+        Run run = pounce("--color=never", "notes");
+
+        assertThat(run.out).isEqualToNormalizingNewlines("""
+                notes.md  C:\\Users\\me\\notes.md
+                  Notes on "quoting".
+                """);
+    }
+
+    @Test
     void highlights_matched_words_in_bold_on_a_colour_terminal() {
-        finalJson = "[" + result("/notes/rollout.md", "The canary rollout went fine.", List.of(4, 10)) + "]";
+        finalJson = json(result("/notes/rollout.md", "The canary rollout went fine.", 4, 10));
 
         Run run = pounce("--color=always", "canary");
 
         assertThat(run.out).contains("The \u001B[1mcanary\u001B[22m rollout went fine.");
+    }
+
+    @Test
+    void does_not_colour_output_that_is_not_a_terminal() {
+        finalJson = json(result("/notes/rollout.md", "The canary rollout went fine.", 4, 10));
+
+        Run run = pounce("canary");
+
+        assertThat(run.out).contains("The canary rollout went fine.").doesNotContain("\u001B");
     }
 
     @Test
@@ -104,7 +130,22 @@ class PounceTest {
         Run run = pounce("zebra");
 
         assertThat(run.exitCode).isEqualTo(1);
-        assertThat(run.err).isEqualTo("No results for \"zebra\".\n");
+        assertThat(run.err).isEqualToNormalizingNewlines("No results for \"zebra\".\n");
+    }
+
+    @Test
+    void reads_the_bootstrap_secret_from_the_usual_home_for_this_system() throws IOException {
+        Path userHome = home.resolve("user");
+        var environment = Map.of("POUNCE_URL", "http://127.0.0.1:" + engine.getAddress().getPort());
+        Path secret = PounceHome.resolve(System.getProperty("os.name"), environment, userHome).bootstrapSecret();
+        Files.createDirectories(secret.getParent());
+        Files.writeString(secret, SECRET + "\n");
+        finalJson = json(result("/notes/rollout.md", "The canary rollout went fine."));
+
+        Run run = pounce(environment, userHome, "--color=never", "canary");
+
+        assertThat(run.err).isEmpty();
+        assertThat(run.out).startsWith("rollout.md  /notes/rollout.md");
     }
 
     @Test
@@ -124,7 +165,7 @@ class PounceTest {
         Run run = pounce("canary");
 
         assertThat(run.exitCode).isEqualTo(2);
-        assertThat(run.err).isEqualTo("Can't read " + home.resolve("bootstrap-secret")
+        assertThat(run.err).isEqualToNormalizingNewlines("Can't read " + home.resolve("bootstrap-secret")
                 + ". Start Pounce once to create it.\n");
     }
 
@@ -135,8 +176,8 @@ class PounceTest {
         Run run = pounce("canary");
 
         assertThat(run.exitCode).isEqualTo(2);
-        assertThat(run.err).isEqualTo("Pounce refused the secret in " + home.resolve("bootstrap-secret")
-                + ". Is it from another Pounce install?\n");
+        assertThat(run.err).isEqualToNormalizingNewlines("Pounce refused the secret in "
+                + home.resolve("bootstrap-secret") + ". Is it from another Pounce install?\n");
     }
 
     // ------------------------------------------------------------------ helpers
@@ -144,24 +185,37 @@ class PounceTest {
     record Run(int exitCode, String out, String err) {
     }
 
+    /** Runs the command with POUNCE_HOME set to this test's temporary folder. */
     Run pounce(String... args) {
-        var out = new StringWriter();
-        var err = new StringWriter();
         var environment = Map.of(
                 "POUNCE_URL", "http://127.0.0.1:" + engine.getAddress().getPort(),
                 "POUNCE_HOME", home.toString());
-        int exitCode = Pounce.commandLine(environment, new PrintWriter(out), new PrintWriter(err)).execute(args);
+        return pounce(environment, home.resolve("user"), args);
+    }
+
+    Run pounce(Map<String, String> environment, Path userHome, String... args) {
+        var out = new StringWriter();
+        var err = new StringWriter();
+        int exitCode = Pounce.commandLine(environment, userHome, new PrintWriter(out), new PrintWriter(err))
+                .execute(args);
         return new Run(exitCode, out.toString(), err.toString());
     }
 
     /** One Result as the Engine sends it; highlights are start/end pairs. */
-    static String result(String path, String snippet, List<Integer> highlights) {
-        var ranges = new ArrayList<String>();
-        for (int i = 0; i < highlights.size(); i += 2) {
-            ranges.add("{\"start\":" + highlights.get(i) + ",\"end\":" + highlights.get(i + 1) + "}");
+    static Map<String, Object> result(String path, String snippet, int... highlights) {
+        var ranges = new ArrayList<Map<String, Integer>>();
+        for (int i = 0; i < highlights.length; i += 2) {
+            ranges.add(Map.of("start", highlights[i], "end", highlights[i + 1]));
         }
-        String name = Path.of(path).getFileName().toString();
-        return "{\"path\":\"" + path + "\",\"name\":\"" + name + "\",\"snippet\":{\"text\":\"" + snippet
-                + "\",\"highlights\":[" + String.join(",", ranges) + "]}}";
+        var result = new HashMap<String, Object>();
+        result.put("path", path);
+        result.put("name", path.substring(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1));
+        result.put("snippet", Map.of("text", snippet, "highlights", ranges));
+        return result;
+    }
+
+    @SafeVarargs
+    static String json(Map<String, Object>... results) {
+        return JSON.writeValueAsString(List.of(results));
     }
 }

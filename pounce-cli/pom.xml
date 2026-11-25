@@ -5,12 +5,13 @@
   <modelVersion>4.0.0</modelVersion>
   <parent><groupId>dev.pounce</groupId><artifactId>pounce</artifactId><version>0.1.0-SNAPSHOT</version></parent>
   <artifactId>pounce-cli</artifactId>
-  <description>The `pounce` terminal command. Talks to the Engine over HTTP only; depends on no Engine module.</description>
+  <description>The `pounce` terminal command. Talks to the Engine over HTTP only; depends on no Engine module, only on pounce-platform to find the Pounce home.</description>
   <properties>
     <!-- No Java 25 features needed: runs on any JDK 21+, including the default `java` on most Macs. -->
     <maven.compiler.release>21</maven.compiler.release>
   </properties>
   <dependencies>
+    <dependency><groupId>dev.pounce</groupId><artifactId>pounce-platform</artifactId></dependency>
     <dependency><groupId>info.picocli</groupId><artifactId>picocli</artifactId><version>4.7.7</version></dependency>
     <dependency><groupId>tools.jackson.core</groupId><artifactId>jackson-databind</artifactId></dependency>
   </dependencies>

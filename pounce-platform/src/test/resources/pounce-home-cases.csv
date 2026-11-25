@@ -1,0 +1,26 @@
+# Cases for where the Pounce home is, shared by every implementation (this module, the Windows Launcher). Fields: os.name,user home,POUNCE_HOME,LOCALAPPDATA,XDG_DATA_HOME,expected home. Split each line on ","; an empty field is an unset variable, <blank> one set to a single space; lines starting with # are comments. Compare paths after turning every \ into /, so every case can be checked on any operating system.
+# macOS: Application Support; XDG and LOCALAPPDATA mean nothing there.
+Mac OS X,/Users/me,,,,/Users/me/Library/Application Support/Pounce
+Mac OS X,/Users/me,,C:\Users\me\AppData\Local,/Users/me/.xdg,/Users/me/Library/Application Support/Pounce
+Mac OS X,/Users/me,/Volumes/data/pounce,,,/Volumes/data/pounce
+Mac OS X,/Users/me,<blank>,,,/Users/me/Library/Application Support/Pounce
+# Windows: %LOCALAPPDATA%\Pounce when it is an absolute path, else the usual place under the user home.
+Windows 11,C:\Users\me,,C:\Users\me\AppData\Local,,C:\Users\me\AppData\Local\Pounce
+Windows 11,C:\Users\me,,D:\Profiles\me\Local,,D:\Profiles\me\Local\Pounce
+Windows 11,C:\Users\me,,,,C:\Users\me\AppData\Local\Pounce
+Windows 11,C:\Users\me,,<blank>,,C:\Users\me\AppData\Local\Pounce
+Windows 11,C:\Users\me,,AppData\Local,,C:\Users\me\AppData\Local\Pounce
+Windows 11,C:\Users\me,,/home/me/.local,,C:\Users\me\AppData\Local\Pounce
+Windows 11,C:\Users\me,,,/home/me/.xdg,C:\Users\me\AppData\Local\Pounce
+Windows 10,C:\Users\me,D:\Pounce,C:\Users\me\AppData\Local,,D:\Pounce
+Windows 11,C:\Users\me,\\server\share\pounce,C:\Users\me\AppData\Local,,\\server\share\pounce
+Windows 11,C:\Users\me,<blank>,C:\Users\me\AppData\Local,,C:\Users\me\AppData\Local\Pounce
+# Linux and every other system: $XDG_DATA_HOME/pounce when it is an absolute path, else ~/.local/share/pounce.
+Linux,/home/me,,,,/home/me/.local/share/pounce
+Linux,/home/me,,,/data/xdg,/data/xdg/pounce
+Linux,/home/me,,,relative/xdg,/home/me/.local/share/pounce
+Linux,/home/me,,,<blank>,/home/me/.local/share/pounce
+Linux,/home/me,,C:\Users\me\AppData\Local,,/home/me/.local/share/pounce
+Linux,/home/me,/srv/pounce,,/data/xdg,/srv/pounce
+Linux,/home/me,<blank>,,/data/xdg,/data/xdg/pounce
+FreeBSD,/home/me,,,,/home/me/.local/share/pounce

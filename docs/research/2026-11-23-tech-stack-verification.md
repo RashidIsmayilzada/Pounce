@@ -186,6 +186,8 @@ Other details:
 
 **Tokenizing in Java.** The options, measured with DJL 0.40.0:
 
+> Superseded: the Engine no longer uses DJL; it tokenizes in pure Java ([ADR 0006](../adr/0006-pure-java-tokenizer.md)).
+
 - `ai.djl.huggingface:tokenizers:0.40.0`
   - Ships `native/lib/osx-aarch64/cpu/libtokenizers.dylib`, ad-hoc signed, `minos` 11.0 (jar inspected).
   - Depends on `ai.djl:api:0.40.0`, which pulls in gson, JNA 5.17.0, commons-compress and slf4j-api 2.0.17 ([POM](https://repo1.maven.org/maven2/ai/djl/api/0.40.0/api-0.40.0.pom)).

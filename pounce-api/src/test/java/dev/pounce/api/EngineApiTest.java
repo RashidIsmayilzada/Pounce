@@ -2,10 +2,14 @@ package dev.pounce.api;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 import java.net.URI;
@@ -25,15 +29,22 @@ import static org.springframework.boot.test.context.SpringBootTest.WebEnvironmen
 
 /**
  * The Engine over real HTTP, the way the CLI and Launcher use it: real model, real Lucene index on disk,
- * a Watched Folder that already holds a file when the Engine starts.
+ * a Watched Folder that already holds a file when the Engine starts. The Engine is stopped after the last test,
+ * so its temporary folders can be deleted.
  */
 @SpringBootTest(webEnvironment = RANDOM_PORT)
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @EnabledIf("modelIsPresent")
 class EngineApiTest {
 
     static final Path MODEL = Path.of(System.getProperty("pounce.model.dir", "../models/bge-small-en-v1.5"));
-    static final Path HOME = tempDirectory("pounce-home");
-    static final Path WATCHED = tempDirectory("pounce-watched");
+
+    @TempDir
+    static Path HOME;
+    @TempDir
+    static Path WATCHED;
+
+    static final JsonMapper JSON = JsonMapper.builder().build();
 
     final HttpClient http = HttpClient.newHttpClient();
 
@@ -46,6 +57,9 @@ class EngineApiTest {
 
     @DynamicPropertySource
     static void engine(DynamicPropertyRegistry properties) throws IOException {
+        // Real paths, as the Engine reports them (on macOS the temporary folder is reached through a link).
+        HOME = HOME.toRealPath();
+        WATCHED = WATCHED.toRealPath();
         Files.writeString(WATCHED.resolve("rollout-notes.md"), "# Deploys\nThe canary rollout went fine.");
         properties.add("pounce.home", HOME::toString);
         properties.add("pounce.watched-folders", WATCHED::toString);
@@ -121,6 +135,19 @@ class EngineApiTest {
         assertThat(body.substring(last)).contains("rollout-notes.md");
     }
 
+    @Test
+    void a_result_names_the_file_by_its_full_real_path() throws Exception {
+        a_file_on_disk_when_the_engine_starts_becomes_searchable();
+
+        String body = search("canary", token()).body();
+
+        String finalData = body.substring(body.indexOf("event:final")).lines()
+                .filter(line -> line.startsWith("data:")).findFirst().orElseThrow().substring("data:".length());
+        JsonNode result = JSON.readTree(finalData).get(0);
+        assertThat(result.get("path").asString()).isEqualTo(WATCHED.resolve("rollout-notes.md").toRealPath().toString());
+        assertThat(result.get("name").asString()).isEqualTo("rollout-notes.md");
+    }
+
     private String token() throws Exception {
         String body = requestToken(Files.readString(HOME.resolve("bootstrap-secret")).strip()).body();
         var matcher = Pattern.compile("\"token\"\\s*:\\s*\"([^\"]+)\"").matcher(body);
@@ -148,13 +175,5 @@ class EngineApiTest {
 
     private URI uri(String path) {
         return URI.create("http://127.0.0.1:" + port + path);
-    }
-
-    private static Path tempDirectory(String prefix) {
-        try {
-            return Files.createTempDirectory(prefix).toRealPath();
-        } catch (IOException e) {
-            throw new IllegalStateException(e);
-        }
     }
 }

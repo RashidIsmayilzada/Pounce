@@ -9,7 +9,8 @@
 ## Checklist
 
 - [ ] `mvn verify` passes
-- [ ] `(cd macos-app && swift test)` passes (if the Launcher changed)
+- [ ] `(cd macos-app && swift test)` passes (if the macOS Launcher changed)
+- [ ] `(cd windows-app && dotnet test)` passes (if the Windows Launcher changed)
 - [ ] Tests were written for the change
 - [ ] `CHANGELOG.md` has a line under `## [Unreleased]` (if users would notice)
-- [ ] Nothing is sent off the Mac
+- [ ] Nothing is sent off the computer

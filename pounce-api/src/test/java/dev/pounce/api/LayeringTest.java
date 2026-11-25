@@ -26,4 +26,16 @@ class LayeringTest {
     static final ArchRule infrastructure_never_uses_spring_or_the_api = noClasses()
             .that().resideInAPackage("dev.pounce.infrastructure..")
             .should().dependOnClassesThat().resideInAnyPackage("org.springframework..", "dev.pounce.api..");
+
+    /** The platform module is shared with the CLI and is not an Engine layer: JDK only. */
+    @ArchTest
+    static final ArchRule platform_depends_on_nothing_but_the_jdk = noClasses()
+            .that().resideInAPackage("dev.pounce.platform..")
+            .should().dependOnClassesThat().resideOutsideOfPackages("dev.pounce.platform..", "java..");
+
+    /** Where files live on each system is a concern of the outer layers; the core never asks. */
+    @ArchTest
+    static final ArchRule domain_and_application_never_use_the_platform_module = noClasses()
+            .that().resideInAnyPackage("dev.pounce.domain..", "dev.pounce.application..")
+            .should().dependOnClassesThat().resideInAPackage("dev.pounce.platform..");
 }
