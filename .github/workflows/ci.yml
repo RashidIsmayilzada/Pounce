@@ -1,5 +1,7 @@
 # Runs every test on each push to main and each pull request.
-# macOS runner: the file-watcher tests use FSEvents and the Launcher is a Swift/AppKit package.
+# test: macOS runner, because the file-watcher tests use FSEvents and the Launcher is a Swift/AppKit package.
+# engine-tests: the Engine and CLI tests on Windows and Linux too.
+# windows-launcher: the Windows Launcher's tests, then a Windows build that is smoke-checked and kept as an artifact.
 name: CI
 
 on:
@@ -50,4 +52,110 @@ jobs:
         with:
           name: test-reports
           path: '**/target/surefire-reports/'
+          if-no-files-found: ignore
+
+  engine-tests:
+    name: Engine and CLI tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Cache the embedding model
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: model-bge-small-en-v1.5-int8-${{ hashFiles('scripts/fetch-model.sh') }}
+
+      - name: Fetch the embedding model
+        shell: bash
+        run: '[ -f models/bge-small-en-v1.5/model.onnx ] || scripts/fetch-model.sh'
+
+      - name: Engine and CLI tests
+        run: mvn -B -ntp verify
+
+      - name: Keep test reports when something fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ matrix.os }}
+          path: '**/target/surefire-reports/'
+          if-no-files-found: ignore
+
+  windows-launcher:
+    name: Windows Launcher
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      DOTNET_NOLOGO: 1
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: windows-app/global.json
+
+      - name: Build
+        working-directory: windows-app
+        run: dotnet build
+
+      - name: Test
+        working-directory: windows-app
+        run: dotnet test
+
+      - name: Check formatting
+        working-directory: windows-app
+        run: dotnet format --verify-no-changes
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Cache the embedding model
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: model-bge-small-en-v1.5-int8-${{ hashFiles('scripts/fetch-model.sh') }}
+
+      - name: Fetch the embedding model
+        shell: bash
+        run: '[ -f models/bge-small-en-v1.5/model.onnx ] || scripts/fetch-model.sh'
+
+      - name: Build Pounce for Windows
+        shell: bash
+        run: scripts/build-windows.sh
+
+      # Kept before the smoke check, so a build that fails it can still be downloaded and tried.
+      - name: Keep the Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pounce-windows-x64
+          path: build/Pounce-*-windows-x64.zip
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Smoke-check the Windows build
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke-windows.ps1
+
+      - name: Keep test results when something fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-launcher-test-results
+          path: windows-app/**/TestResults/
           if-no-files-found: ignore
