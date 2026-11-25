@@ -1,6 +1,7 @@
 package dev.pounce.application;
 
 import dev.pounce.domain.Exclusions;
+import dev.pounce.domain.LinkedFolders;
 import dev.pounce.domain.Passage;
 import dev.pounce.domain.PassageSplitter;
 import dev.pounce.domain.TextFormat;
@@ -151,16 +152,27 @@ public final class Indexer {
 
     /**
      * Visits every file below {@code start} that can hold a Document ({@link #isDocumentFile}; a link to one counts,
-     * links to folders are not followed), without entering excluded folders. A file or folder that cannot be read
-     * is logged, reported to {@code onUnreadable} and skipped.
+     * links to folders are not followed), without entering excluded folders or looping through Windows junctions
+     * ({@link LinkedFolders}). A file or folder that cannot be read is logged, reported to {@code onUnreadable} and
+     * skipped.
      */
     private void walk(Path watchedFolder, Path start, Consumer<Path> onFile, Consumer<Path> onUnreadable) {
         try {
             Files.walkFileTree(start, new SimpleFileVisitor<>() {
+                private final LinkedFolders links = new LinkedFolders();
+
                 @Override
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-                    return exclusions.excludesFolder(watchedFolder, dir) ? FileVisitResult.SKIP_SUBTREE
-                            : FileVisitResult.CONTINUE;
+                    if (exclusions.excludesFolder(watchedFolder, dir)) {
+                        return FileVisitResult.SKIP_SUBTREE;
+                    }
+                    // "Other": a Windows junction, mount point or OneDrive folder, which may lead elsewhere.
+                    if (attrs.isOther() && !links.mayEnter(dir)) {
+                        LOG.log(System.Logger.Level.INFO,
+                                "Skipped {0}: it leads into a folder above it, or to one already walked", dir);
+                        return FileVisitResult.SKIP_SUBTREE;
+                    }
+                    return FileVisitResult.CONTINUE;
                 }
 
                 @Override

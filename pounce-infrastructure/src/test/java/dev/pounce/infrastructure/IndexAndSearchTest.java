@@ -322,6 +322,22 @@ class IndexAndSearchTest {
                 .containsExactly(folder.resolve("notes.md"));
     }
 
+    @Test
+    void a_link_to_a_folder_above_is_not_followed() throws IOException {
+        write("projects/notes.md", "The canary rollout went fine.");
+        try {
+            Files.createSymbolicLink(folder.resolve("projects/back-up"), folder);
+        } catch (IOException | UnsupportedOperationException e) {
+            assumeTrue(false, "cannot create a symbolic link here (on Windows it needs Developer Mode or admin): " + e);
+        }
+
+        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> engine.indexer().reconcile());
+
+        assertThat(engine.searcher().search(Query.of("canary"), Phase.FINAL))
+                .extracting(Result::path)
+                .containsExactly(folder.resolve("projects/notes.md"));
+    }
+
     /** Opening a named pipe waits for a writer, forever: it must never be read, however it is reached. */
     @Test
     void a_named_pipe_in_a_watched_folder_is_never_read_or_indexed() throws IOException, InterruptedException {

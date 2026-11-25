@@ -1,6 +1,7 @@
 package dev.pounce.infrastructure;
 
 import dev.pounce.domain.Exclusions;
+import dev.pounce.domain.LinkedFolders;
 import io.methvin.watcher.DirectoryChangeEvent;
 import io.methvin.watcher.DirectoryChangeEvent.EventType;
 import io.methvin.watcher.DirectoryChangeListener;
@@ -198,7 +199,8 @@ public final class FolderWatcher implements AutoCloseable {
     /**
      * Walks a folder the way the library's default visitor does (to register folders and to list a folder that
      * appeared), but never enters an excluded folder: on Linux each folder entered costs an inotify watch, and a
-     * {@code node_modules} or {@code .git} can hold thousands. Folders that cannot be read are skipped, as before.
+     * {@code node_modules} or {@code .git} can hold thousands. Nor does it loop through a Windows junction that leads
+     * back up ({@link LinkedFolders}). Folders that cannot be read are skipped, as before.
      */
     private final class SkipExcludedFolders implements FileTreeVisitor {
 
@@ -206,9 +208,15 @@ public final class FolderWatcher implements AutoCloseable {
         public void recursiveVisitFiles(Path start, Callback onDirectory, Callback onFile) throws IOException {
             Path root = rootOf(start);
             Files.walkFileTree(start, new SimpleFileVisitor<>() {
+                private final LinkedFolders links = new LinkedFolders();
+
                 @Override
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
                     if (exclusions.excludesFolder(root, dir)) {
+                        return FileVisitResult.SKIP_SUBTREE;
+                    }
+                    // "Other": a Windows junction, mount point or OneDrive folder, which may lead elsewhere.
+                    if (attrs.isOther() && !links.mayEnter(dir)) {
                         return FileVisitResult.SKIP_SUBTREE;
                     }
                     onDirectory.call(dir);
