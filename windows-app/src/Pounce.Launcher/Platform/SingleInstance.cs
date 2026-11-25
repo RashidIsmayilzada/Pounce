@@ -145,7 +145,7 @@ public sealed class SingleInstance : IDisposable
         }
     }
 
-    /// <summary>Asks the running instance to show its panel. Does nothing when none is running.</summary>
+    /// <summary>Asks the running instance to show its panel. Does nothing when none is running. Never throws.</summary>
     public static void SignalShow()
     {
         try
@@ -173,7 +173,8 @@ public sealed class SingleInstance : IDisposable
     }
 
     /// <summary>Asks the running instance to quit and waits until it has exited or the time is up.
-    /// True when no instance is running afterwards; false at once for one this launch may not signal.</summary>
+    /// True when no instance is running afterwards; false at once for one this launch may not signal, and false when
+    /// it cannot be told whether one still runs. Never throws.</summary>
     public static bool SignalQuit(TimeSpan timeout)
     {
         try
@@ -210,7 +211,16 @@ public sealed class SingleInstance : IDisposable
         catch (Exception e)
         {
             Log.Warn("Could not ask the running Pounce to quit", e);
-            return !MutexExists();
+            try
+            {
+                return !MutexExists();
+            }
+            catch (Exception again)
+            {
+                // Unknown whether one still runs: not "none runs".
+                Log.Warn("Could not tell whether a Pounce is still running", again);
+                return false;
+            }
         }
     }
 
