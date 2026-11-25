@@ -8,9 +8,10 @@
   <version>0.1.0-SNAPSHOT</version>
   <packaging>pom</packaging>
   <name>Pounce</name>
-  <description>Private, on-device semantic search for macOS</description>
+  <description>Private, on-device semantic search for macOS, Windows and Linux</description>
 
   <modules>
+    <module>pounce-platform</module>
     <module>pounce-domain</module>
     <module>pounce-application</module>
     <module>pounce-infrastructure</module>
@@ -37,6 +38,7 @@
         <type>pom</type>
         <scope>import</scope>
       </dependency>
+      <dependency><groupId>dev.pounce</groupId><artifactId>pounce-platform</artifactId><version>${project.version}</version></dependency>
       <dependency><groupId>dev.pounce</groupId><artifactId>pounce-domain</artifactId><version>${project.version}</version></dependency>
       <dependency><groupId>dev.pounce</groupId><artifactId>pounce-application</artifactId><version>${project.version}</version></dependency>
       <dependency><groupId>dev.pounce</groupId><artifactId>pounce-infrastructure</artifactId><version>${project.version}</version></dependency>
