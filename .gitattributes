@@ -1,0 +1,10 @@
+# Shell scripts keep LF endings on every checkout, Windows included, so bash can run them there (CI uses Git Bash).
+*.sh            text eol=lf
+scripts/pounce  text eol=lf
+
+# Never converted or diffed as text.
+*.ico           binary
+*.png           binary
+*.gif           binary
+*.mp4           binary
+*.onnx          binary
