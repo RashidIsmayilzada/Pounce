@@ -36,6 +36,30 @@ public sealed record Configuration(Uri EngineUrl, PounceHome Home, HotKeySpec Ho
             HotKeySpec.Parse(environment("POUNCE_HOTKEY")));
     }
 
+    /// <summary>
+    /// The bundled Engine next to <c>Pounce.exe</c> in <paramref name="appFolder"/>, set up to listen where
+    /// <see cref="EngineUrl"/> says: its port, and its address when that is a loopback address other than the Engine's
+    /// own <c>127.0.0.1</c>. Null when <see cref="EngineUrl"/> is not a plain http address on this machine's loopback
+    /// (an Engine on another machine, or behind something that speaks https): then the Launcher uses that one and
+    /// starts none of its own.
+    /// </summary>
+    /// <param name="appFolder">The folder holding <c>Pounce.exe</c> (<c>AppContext.BaseDirectory</c>).</param>
+    public EngineLayout? BundledEngine(string appFolder) => BundledEngine(appFolder, Directory.Exists);
+
+    /// <summary><see cref="BundledEngine(string)"/>, asking <paramref name="folderExists"/> instead of the disk.</summary>
+    internal EngineLayout? BundledEngine(string appFolder, Func<string, bool> folderExists)
+    {
+        if (EngineUrl.Scheme != Uri.UriSchemeHttp || !EngineUrl.IsLoopback)
+        {
+            return null;
+        }
+        // localhost reaches the Engine's 127.0.0.1 too (the client tries each address it resolves to).
+        string? address = EngineUrl.HostNameType is UriHostNameType.IPv4 or UriHostNameType.IPv6 && EngineUrl.DnsSafeHost != "127.0.0.1"
+            ? EngineUrl.DnsSafeHost
+            : null;
+        return EngineLayout.Bundled(appFolder, Home.Folder, folderExists) with { Port = EngineUrl.Port, Address = address };
+    }
+
     /// <summary>A client for the Engine, logging in with the secret in <see cref="Home"/>. Keep it for the life of the app.</summary>
     public HttpEngineClient CreateEngineClient() => new(EngineUrl, Home.SecretFile);
 

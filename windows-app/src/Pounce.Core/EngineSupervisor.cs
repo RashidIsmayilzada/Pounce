@@ -24,8 +24,17 @@ namespace Pounce.Core;
 /// <c>%TEMP%</c> (a loaded DLL can't be deleted, so each start would leave about 20 MB there) and works where policy
 /// forbids loading DLLs from it.
 /// </param>
-public sealed record EngineLayout(string AppFolder, string Home, bool BundlesOnnxRuntime = false)
+/// <param name="Port">The port the Engine listens on: the one in the Engine address the Launcher talks to.</param>
+/// <param name="Address">
+/// The loopback address the Engine listens on, when not its own default, <c>127.0.0.1</c> (for an Engine address such
+/// as <c>http://[::1]:7431</c>); null for the default.
+/// </param>
+public sealed record EngineLayout(string AppFolder, string Home, bool BundlesOnnxRuntime = false, int Port = EngineLayout.DefaultPort,
+    string? Address = null)
 {
+    /// <summary>The port the Engine listens on unless told otherwise.</summary>
+    public const int DefaultPort = 7431;
+
     /// <summary>The Engine's jar, relative to <see cref="AppFolder"/>.</summary>
     public const string JarPath = @"engine\pounce-engine.jar";
 
@@ -88,6 +97,9 @@ public sealed record EngineLayout(string AppFolder, string Home, bool BundlesOnn
         .. (BundlesOnnxRuntime ? [$"-Donnxruntime.native.path={OnnxRuntimeNativesPath}"] : (string[])[]),
         "-jar", JarPath,
         $"--pounce.model-dir={ModelPath}",
+        // Where the Launcher will look for it (POUNCE_URL may name another port).
+        $"--server.port={Port}",
+        .. (Address is null ? (string[])[] : [$"--server.address={Address}"]),
     ];
 }
 

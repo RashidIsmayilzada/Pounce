@@ -19,7 +19,8 @@ public class EngineSupervisorTests
         FakeStarter.Launch launch = Assert.Single(_starter.Started);
         Assert.Equal(@"C:\Program Files\Pounce\runtime\bin\java.exe", launch.Executable);
         Assert.Equal(@"C:\Program Files\Pounce", launch.WorkingDirectory);
-        Assert.Equal(["-jar", @"engine\pounce-engine.jar", @"--pounce.model-dir=models\bge-small-en-v1.5"], launch.Arguments.TakeLast(3));
+        Assert.Equal(["-jar", @"engine\pounce-engine.jar", @"--pounce.model-dir=models\bge-small-en-v1.5", "--server.port=7431"],
+            launch.Arguments.TakeLast(4));
         Assert.Equal(@"C:\Users\me\AppData\Local\Pounce", launch.Environment["POUNCE_HOME"]);
     });
 
@@ -164,6 +165,7 @@ public class EngineLayoutTests
                 "-Dpounce.parent-pid=4242",
                 "-jar", @"engine\pounce-engine.jar",
                 @"--pounce.model-dir=models\bge-small-en-v1.5",
+                "--server.port=7431",
             ],
             layout.ArgumentsFor(4242));
     }
@@ -215,6 +217,7 @@ public class EngineLayoutTests
                 @"-Donnxruntime.native.path=native\onnxruntime",
                 "-jar", @"engine\pounce-engine.jar",
                 @"--pounce.model-dir=models\bge-small-en-v1.5",
+                "--server.port=7431",
             ],
             layout.ArgumentsFor(4242));
     }
@@ -434,6 +437,51 @@ public class ConfigurationTests
     public void An_unusable_url_falls_back_to_the_default(string url)
     {
         Assert.Equal(Configuration.DefaultEngineUrl, From(("POUNCE_URL", url)).EngineUrl);
+    }
+
+    [Fact]
+    public void The_bundled_engine_listens_on_the_default_port_by_default()
+    {
+        EngineLayout? layout = From().BundledEngine(@"C:\Program Files\Pounce", _ => false);
+
+        Assert.Equal(new EngineLayout(@"C:\Program Files\Pounce", @"C:\Users\me\AppData\Local\Pounce", Port: 7431), layout);
+        Assert.Equal("--server.port=7431", layout!.ArgumentsFor(4242)[^1]);
+    }
+
+    [Theory]
+    [InlineData("http://127.0.0.1:9000", 9000)]
+    [InlineData("http://localhost:9000/", 9000)]
+    [InlineData("http://LOCALHOST:9001", 9001)]
+    [InlineData("http://127.0.0.1", 80)]
+    public void The_bundled_engine_listens_on_the_port_of_pounce_url(string url, int port)
+    {
+        EngineLayout? layout = From(("POUNCE_URL", url)).BundledEngine(@"C:\Program Files\Pounce", _ => false);
+
+        Assert.NotNull(layout);
+        Assert.Equal(port, layout.Port);
+        Assert.Null(layout.Address);
+        Assert.Equal(["-jar", @"engine\pounce-engine.jar", @"--pounce.model-dir=models\bge-small-en-v1.5", $"--server.port={port}"],
+            layout.ArgumentsFor(4242).TakeLast(4));
+    }
+
+    [Theory]
+    [InlineData("http://[::1]:9000", "::1")]
+    [InlineData("http://127.0.0.2:9000", "127.0.0.2")]
+    public void Another_loopback_address_is_passed_on_too(string url, string address)
+    {
+        EngineLayout layout = From(("POUNCE_URL", url)).BundledEngine(@"C:\Program Files\Pounce", _ => false)!;
+
+        Assert.Equal(["--server.port=9000", $"--server.address={address}"], layout.ArgumentsFor(4242).TakeLast(2));
+    }
+
+    [Theory]
+    [InlineData("http://192.168.1.20:7431")]
+    [InlineData("http://pounce.example.com:7431")]
+    [InlineData("http://0.0.0.0:7431")]
+    [InlineData("https://127.0.0.1:7431")]
+    public void An_engine_elsewhere_means_no_bundled_engine(string url)
+    {
+        Assert.Null(From(("POUNCE_URL", url)).BundledEngine(@"C:\Program Files\Pounce", _ => throw new InvalidOperationException("not asked")));
     }
 
     [Fact]
