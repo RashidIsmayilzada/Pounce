@@ -47,7 +47,7 @@ Before you start: run `Pounce.exe` with an Engine running (bundled, or `POUNCE_U
 | Select a file row and press Enter. | The panel disappears and the file opens in its default app, in front. |
 | Select a file row and press Ctrl+Enter. | The panel disappears and File Explorer opens with the file selected, in front. |
 | Click a row. | Opens it, as Enter would. Pressing on one row and releasing on another opens nothing. |
-| Press Alt+Space again after opening something. | The panel opens empty and small: no flash of the previous search, not even for a frame. |
+| Press Alt+Space again after opening something, and again after closing with Esc. Watch closely, or film the screen. | The panel opens empty and small. After Esc there must be no flash of the previous search. After opening an item, a flash of the old search text for a single frame is a known possibility (the panel hides at once there, see the code comments); note whether you see it. |
 
 ## 5. Hiding
 

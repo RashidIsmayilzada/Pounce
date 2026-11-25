@@ -29,7 +29,10 @@ namespace Pounce.Launcher;
 /// <para>Focus: the panel hides when it loses the focus to another program, after opening an item, and on Esc.</para>
 /// <para>Hiding clears the search first and hides one frame later. A hidden window keeps its last frame, and Windows
 /// can show that frame for a moment when the window is shown again, before WPF has drawn a new one; rendering the
-/// empty search bar before hiding means that moment shows the right thing instead of the previous search.</para>
+/// empty search bar before hiding means that moment shows the right thing instead of the previous search.
+/// Opening an item is the exception: it hides at once (see <see cref="OpenSelected"/>), so the next show may show the
+/// old search for one frame. If that is visible on real machines, cloaking the window (DWMWA_CLOAK) from Show until
+/// its first new frame is the fix.</para>
 /// </remarks>
 public sealed partial class LauncherWindow : Window, ILauncherPanel
 {
