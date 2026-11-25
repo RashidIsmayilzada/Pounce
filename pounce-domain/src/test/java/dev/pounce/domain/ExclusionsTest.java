@@ -46,6 +46,10 @@ class ExclusionsTest {
             "$RECYCLE.BIN/report.docx",
             "System Volume Information/tracking.log",
             "system volume information/tracking.log",
+            "$WinREAgent/Scratch/update.log",
+            "$SysReset/Logs/setupact.log",
+            "$Windows.~BT/Sources/setup.log",
+            "$WINDOWS.~WS/Sources/setup.log",
             "Pictures/desktop.ini",
             "Pictures/Desktop.ini",
             "Pictures/Thumbs.db",
@@ -58,7 +62,8 @@ class ExclusionsTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"Documents/report.docx", "Documents/~notes.md", "Documents/$5 budget.txt", "Documents/thumbs.md"})
+    @ValueSource(strings = {"Documents/report.docx", "Documents/~notes.md", "Documents/$5 budget.txt", "Documents/thumbs.md",
+            "$archive/notes.md", "Documents/$Recycle/notes.md", "projects/$templates/plan.md"})
     void keeps_files_that_only_look_like_windows_system_files(String path) {
         assertThat(excludes(HOME, path)).isFalse();
     }

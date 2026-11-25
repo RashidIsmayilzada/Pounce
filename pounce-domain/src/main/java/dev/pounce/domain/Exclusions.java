@@ -3,6 +3,7 @@ package dev.pounce.domain;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -11,8 +12,10 @@ import java.util.Set;
  * <ul>
  *   <li><b>Name rules</b> look only at the folders below the Watched Folder (and the file's own name): hidden
  *       folders ({@code .git}), dependency and build folders ({@code node_modules}, {@code target}…), Windows system
- *       folders ({@code $Recycle.Bin}, {@code System Volume Information}), and the files {@code desktop.ini},
- *       {@code Thumbs.db} and Office lock files ({@code ~$report.docx}). The Watched Folder's own path is never
+ *       folders ({@code $Recycle.Bin}, {@code System Volume Information}, {@code $WinREAgent}, {@code $SysReset},
+ *       {@code $Windows.~BT}, {@code $Windows.~WS}; other folders starting with {@code $} are the user's), and the
+ *       files {@code desktop.ini}, {@code Thumbs.db} and Office lock files ({@code ~$report.docx}). The Watched
+ *       Folder's own path is never
  *       judged by name, so a Watched Folder inside a hidden folder or under {@code AppData\Local\Temp} is indexed.</li>
  *   <li><b>Location rules</b> skip the places where programs keep their own files: {@code ~/Library},
  *       {@code ~/AppData} and {@code ~/snap}. They apply when the walk reaches such a place from a Watched Folder
@@ -35,6 +38,9 @@ public final class Exclusions {
     private static final int RECALL_ON_DATA_ACCESS = 0x40_0000;
     private static final Set<String> SKIPPED_FOLDERS = Set.of(
             "node_modules", "venv", "site-packages", "__pycache__", "target", "build");
+    /** Folders Windows keeps for itself at the top of a drive, in lower case: Windows ignores case. */
+    private static final Set<String> WINDOWS_SYSTEM_FOLDERS = Set.of(
+            "$recycle.bin", "system volume information", "$winreagent", "$sysreset", "$windows.~bt", "$windows.~ws");
 
     private final List<Path> programLocations;
     private final Path pounceHome;
@@ -95,8 +101,8 @@ public final class Exclusions {
     }
 
     private static boolean isSkippedFolderName(String name) {
-        return name.startsWith(".") || name.startsWith("$") || SKIPPED_FOLDERS.contains(name)
-                || name.equalsIgnoreCase("System Volume Information");
+        return name.startsWith(".") || SKIPPED_FOLDERS.contains(name)
+                || WINDOWS_SYSTEM_FOLDERS.contains(name.toLowerCase(Locale.ROOT));
     }
 
     private static boolean isSkippedFileName(String name) {
