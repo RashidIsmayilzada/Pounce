@@ -101,4 +101,76 @@ public class AppSearchTests
         Assert.Equal(["Calculator"], model.Apps.Select(app => app.Name));
         Assert.Equal(new AppItem(_apps.Named("Calculator")), model.Items[0]);
     });
+
+    [Fact]
+    public void A_reload_keeps_the_selection_on_the_same_app() => SingleThreadContext.Run(async _ =>
+    {
+        var apps = new ChangingApps("Notes Exporter", "Sticky Notes");
+        var model = new SearchModel(_engine, apps);
+        await model.ReloadAppsAsync();
+        model.Query = "notes";
+        model.MoveSelection(1);
+        Assert.Equal("Sticky Notes", model.Selected?.Name);
+
+        // A better match was installed meanwhile: it ranks first and pushes the selected app down a row.
+        apps.Names = ["Notes", "Notes Exporter", "Sticky Notes"];
+        await model.ReloadAppsAsync();
+
+        Assert.Equal(["Notes", "Notes Exporter", "Sticky Notes"], model.Apps.Select(app => app.Name));
+        Assert.Equal(2, model.Selection);
+        Assert.Equal("Sticky Notes", model.Selected?.Name);
+    });
+
+    [Fact]
+    public void A_reload_that_removes_the_selected_app_selects_a_row_that_exists() => SingleThreadContext.Run(async _ =>
+    {
+        var apps = new ChangingApps("Notes", "Notes Exporter", "Sticky Notes");
+        var model = new SearchModel(_engine, apps);
+        await model.ReloadAppsAsync();
+        model.Query = "notes";
+        model.MoveSelection(2);
+        Assert.Equal("Sticky Notes", model.Selected?.Name);
+        var seen = new List<(int Selection, int Count)>();
+        model.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(SearchModel.Items))
+            {
+                seen.Add((model.Selection, model.Items.Count));
+            }
+        };
+
+        apps.Names = ["Notes"];
+        await model.ReloadAppsAsync();
+
+        Assert.Equal(0, model.Selection);
+        Assert.Equal("Notes", model.Selected?.Name);
+        // Listeners never see the selection point past the rows, not even while the change is announced.
+        Assert.Equal([(0, 1)], seen);
+    });
+
+    [Fact]
+    public void A_reload_that_removes_every_match_leaves_nothing_selected() => SingleThreadContext.Run(async _ =>
+    {
+        var apps = new ChangingApps("Notes", "Sticky Notes");
+        var model = new SearchModel(_engine, apps);
+        await model.ReloadAppsAsync();
+        model.Query = "notes";
+        model.MoveSelection(1);
+
+        apps.Names = ["Calculator"];
+        await model.ReloadAppsAsync();
+
+        Assert.Empty(model.Items);
+        Assert.Equal(0, model.Selection);
+        Assert.Null(model.Selected);
+    });
+
+    /// <summary>Apps that a test can install and remove between listings.</summary>
+    private sealed class ChangingApps(params string[] names) : IAppSource
+    {
+        public string[] Names { get; set; } = names;
+
+        public IReadOnlyList<AppEntry> ListApps() =>
+            [.. Names.Select(name => new AppEntry(name, $@"C:\ProgramData\Microsoft\Windows\Start Menu\Programs\{name}.lnk"))];
+    }
 }

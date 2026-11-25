@@ -629,13 +629,8 @@ public sealed partial class LauncherWindow : Window, ILauncherPanel
         switch (e.PropertyName)
         {
             case nameof(SearchModel.Items):
+                // The model keeps the selection inside the rows (and on the same item across an apps reload).
                 SyncRows();
-                if (rows.Count > 0 && (model.Selection < 0 || model.Selection >= rows.Count))
-                {
-                    // Re-ranking the apps after a reload changes the rows without resetting the selection, which
-                    // can then point past the end (Enter would do nothing). Searches reset it themselves.
-                    model.Selection = 0;
-                }
                 SyncSelection();
                 SyncResultsVisibility();
                 break;

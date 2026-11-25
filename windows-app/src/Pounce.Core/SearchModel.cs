@@ -125,12 +125,17 @@ public sealed class SearchModel : INotifyPropertyChanged
     /// <summary>Apps first, then Results: the order of the rows and of the selection.</summary>
     public IReadOnlyList<SearchItem> Items => _items;
 
-    /// <summary>The index of the selected row in <see cref="Items"/>; back to 0 whenever the rows change.</summary>
+    /// <summary>
+    /// The index of the selected row in <see cref="Items"/>: back to 0 for every new search, kept on the same item
+    /// when <see cref="ReloadAppsAsync"/> re-ranks the apps. Always inside <see cref="Items"/> (0 when there are no
+    /// rows): a value outside is clamped to the nearest row.
+    /// </summary>
     public int Selection
     {
         get => _selection;
         set
         {
+            value = Clamp(value, _items.Count);
             if (value == _selection)
             {
                 return;
@@ -141,7 +146,7 @@ public sealed class SearchModel : INotifyPropertyChanged
         }
     }
 
-    /// <summary>The selected row, or null when <see cref="Selection"/> is outside <see cref="Items"/>.</summary>
+    /// <summary>The selected row, or null when there are no rows.</summary>
     public SearchItem? Selected => _selection >= 0 && _selection < _items.Count ? _items[_selection] : null;
 
     /// <summary>Moves the selection by <paramref name="step"/> rows (−1 up, 1 down), stopping at the first and last row.</summary>
@@ -157,14 +162,15 @@ public sealed class SearchModel : INotifyPropertyChanged
     /// <summary>
     /// Re-reads the installed applications on a thread-pool thread, then re-ranks them for the current Query on the
     /// UI thread. Call it when the panel opens, to pick up apps installed or removed since. If the app source fails,
-    /// the task fails and the previous apps stay.
+    /// the task fails and the previous apps stay. The selection stays on the same item when that is still listed
+    /// (the user may have moved it while the listing ran); otherwise it moves to the nearest row.
     /// </summary>
     public async Task ReloadAppsAsync()
     {
         IAppSource source = _appSource;
         IReadOnlyList<AppEntry> catalog = await Task.Run(source.ListApps);
         _catalog = catalog;
-        SetApps(AppMatcher.Rank(_query, _catalog));
+        SetApps(AppMatcher.Rank(_query, _catalog), keep: Selected);
     }
 
     private void Start()
@@ -240,11 +246,11 @@ public sealed class SearchModel : INotifyPropertyChanged
         Selection = 0;
     }
 
-    private void SetApps(IReadOnlyList<AppEntry> apps)
+    private void SetApps(IReadOnlyList<AppEntry> apps, SearchItem? keep = null)
     {
         _apps = apps;
         Raise(nameof(Apps));
-        RebuildItems();
+        RebuildItems(keep);
     }
 
     private void SetIsFinal(bool final)
@@ -258,7 +264,12 @@ public sealed class SearchModel : INotifyPropertyChanged
         Raise(nameof(IsSearching));
     }
 
-    private void RebuildItems()
+    /// <summary>
+    /// Rebuilds <see cref="Items"/>. The selection moves to <paramref name="keep"/> when it is among the new rows,
+    /// and is otherwise clamped to them; it is updated before <see cref="Items"/> is announced, so a listener never
+    /// sees it point past the end.
+    /// </summary>
+    private void RebuildItems(SearchItem? keep = null)
     {
         var items = new SearchItem[_apps.Count + _results.Count];
         for (int i = 0; i < _apps.Count; i++)
@@ -270,9 +281,19 @@ public sealed class SearchModel : INotifyPropertyChanged
             items[_apps.Count + i] = new FileItem(_results[i]);
         }
         _items = items;
+        int kept = keep is null ? -1 : Array.IndexOf(items, keep);
+        int selection = kept >= 0 ? kept : Clamp(_selection, items.Length);
+        bool selectionChanged = selection != _selection;
+        _selection = selection;
         Raise(nameof(Items));
+        if (selectionChanged)
+        {
+            Raise(nameof(Selection));
+        }
         Raise(nameof(Selected));
     }
+
+    private static int Clamp(int selection, int count) => count == 0 ? 0 : Math.Clamp(selection, 0, count - 1);
 
     private void Raise(string property) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property));
 }

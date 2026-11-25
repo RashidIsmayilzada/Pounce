@@ -194,12 +194,30 @@ public class SearchModelTests
     });
 
     [Fact]
-    public void A_selection_outside_the_rows_selects_nothing() => SingleThreadContext.Run(_ =>
+    public void Without_rows_nothing_is_selected() => SingleThreadContext.Run(_ =>
     {
         var model = new SearchModel(_engine) { Selection = -1 };
 
+        Assert.Equal(0, model.Selection);
         Assert.Null(model.Selected);
         return Task.CompletedTask;
+    });
+
+    [Fact]
+    public void A_selection_outside_the_rows_is_clamped_to_the_nearest_row() => SingleThreadContext.Run(async _ =>
+    {
+        var model = new SearchModel(_engine);
+        model.Query = "canary";
+        await _engine.WhenSearching("canary");
+        _engine.Send(SearchPhase.Final([Item("a.md"), Item("b.md")]), "canary");
+        await model.Until(m => m.IsFinal);
+
+        model.Selection = 7;
+        Assert.Equal(1, model.Selection);
+        Assert.Equal(new FileItem(Item("b.md")), model.Selected);
+
+        model.Selection = -3;
+        Assert.Equal(0, model.Selection);
     });
 
     /// <summary>Records the one search it gets, and never answers.</summary>
