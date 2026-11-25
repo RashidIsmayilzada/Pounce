@@ -40,6 +40,7 @@ public partial class App : Application
         }
 
         var configuration = Configuration.FromEnvironment();
+        Log.Start(Path.Combine(Path.GetDirectoryName(configuration.Home.EngineLog)!, "launcher.log"));
         FirstRun.EnsureSettings(configuration.Home);
         StartBundledEngine(configuration);
 

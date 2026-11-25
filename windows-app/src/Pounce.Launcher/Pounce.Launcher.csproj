@@ -15,6 +15,8 @@
     <!-- WFO0003 asks WinForms apps to set DPI mode in code. This is a WPF app that only borrows
          NotifyIcon from WinForms; WPF reads DPI awareness from app.manifest, so the manifest is right. -->
     <NoWarn>$(NoWarn);WFO0003</NoWarn>
+    <!-- Source-generated P/Invoke ([LibraryImport]) needs this. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <!-- Release and publish settings. Sizes measured by cross-publishing win-x64 from Linux with SDK 10.0.404. -->
