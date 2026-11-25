@@ -18,11 +18,13 @@ import java.nio.file.attribute.AclFileAttributeView;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.nio.file.attribute.UserPrincipal;
+import java.nio.file.attribute.UserPrincipalNotFoundException;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /** The bootstrap secret and signing key on a real disk: created once, kept for the user alone, reused after. */
 class CredentialsTest {
@@ -105,7 +107,14 @@ class CredentialsTest {
     @EnabledOnOs(OS.WINDOWS)
     void on_windows_a_secret_under_a_folder_shared_with_all_users_is_not_shared() throws IOException {
         var lookup = FileSystems.getDefault().getUserPrincipalLookupService();
-        UserPrincipal users = lookup.lookupPrincipalByGroupName("BUILTIN\\Users");
+        UserPrincipal users;
+        try {
+            users = lookup.lookupPrincipalByGroupName("BUILTIN\\Users");
+        } catch (UserPrincipalNotFoundException translated) {
+            // Windows translates the name on other languages (VORDEFINIERT\Benutzer…) and Java cannot look up a SID.
+            assumeTrue(false, "the Users group has another name on this system: " + translated.getName());
+            return;
+        }
         var view = Files.getFileAttributeView(folder, AclFileAttributeView.class);
         var acl = new ArrayList<>(view.getAcl());
         acl.add(AclEntry.newBuilder().setType(AclEntryType.ALLOW).setPrincipal(users)

@@ -226,7 +226,7 @@ class IndexAndSearchTest {
         write("Notes.md", "The canary rollout went fine.");
         engine.indexer().reconcile();
 
-        Files.move(folder.resolve("Notes.md"), folder.resolve("notes.md"));
+        renameChangingOnlyCase("Notes.md", "notes.md");
         engine.indexer().refresh(folder.resolve("Notes.md"));
         engine.indexer().refresh(folder.resolve("notes.md"));
 
@@ -238,7 +238,7 @@ class IndexAndSearchTest {
         write("Notes.md", "The canary rollout went fine.");
         engine.indexer().reconcile();
 
-        Files.move(folder.resolve("Notes.md"), folder.resolve("notes.md"));
+        renameChangingOnlyCase("Notes.md", "notes.md");
         engine.indexer().reconcile();
 
         assertThat(fileNamesFound("canary")).containsExactly("notes.md");
@@ -389,6 +389,16 @@ class IndexAndSearchTest {
 
         assertThat(engine.searcher().search(Query.of("passport"), Phase.EARLY).getFirst().snippet())
                 .isEqualTo(Snippet.NONE);
+    }
+
+    /**
+     * Through a third name: on Windows {@code Files.move} onto a name that differs only in case does nothing, since
+     * the target "is" the file already (Explorer can rename in one step; Java cannot). The Index sees the same end
+     * result either way.
+     */
+    private void renameChangingOnlyCase(String from, String to) throws IOException {
+        Path between = Files.move(folder.resolve(from), folder.resolve(from + ".renaming"));
+        Files.move(between, folder.resolve(to));
     }
 
     /** Compared as text: on Windows two paths that differ only in case are equal. */

@@ -71,6 +71,7 @@ class DefaultWatchedFoldersTest {
     }
 
     @Test
+    @DisabledOnOs(value = OS.WINDOWS, disabledReason = "user-dirs.dirs holds POSIX paths; Windows paths cannot be written in it")
     void on_linux_follows_the_xdg_user_dirs() throws IOException {
         Path elsewhere = folders("Dokumente", "Schreibtisch", "elsewhere/Downloads").resolve("elsewhere");
         folders("Documents", "Desktop", "Downloads", ".config");
@@ -87,6 +88,7 @@ class DefaultWatchedFoldersTest {
     }
 
     @Test
+    @DisabledOnOs(value = OS.WINDOWS, disabledReason = "user-dirs.dirs holds POSIX paths; Windows paths cannot be written in it")
     void on_linux_reads_user_dirs_from_xdg_config_home() throws IOException {
         Path config = folders("Dokumente", "Desktop", "my-config").resolve("my-config");
         Files.writeString(config.resolve("user-dirs.dirs"), "XDG_DOCUMENTS_DIR=\"$HOME/Dokumente\"\n");
