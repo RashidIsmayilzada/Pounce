@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -19,6 +20,11 @@ namespace Pounce.Launcher.Platform;
 /// first and stale ones are dropped. A file that no longer exists, or that the shell cannot make an item for, gets
 /// the generic icon of its type (<c>SHGetFileInfo</c>, which needs no file on disk). Failures are logged once per
 /// cause and give no icon.</para>
+/// <para>Every load runs on that one thread, so one slow shell call holds up every icon and the Apps-folder listing.
+/// A file on a volume that may be slow (a UNC path, or a network, removable or optical drive: see
+/// <see cref="VolumePath"/>) is therefore never touched: it gets its type's icon, cached under the type key. Which
+/// kind a drive is comes from <c>GetDriveTypeW</c>, asked off the UI and shell threads (<see cref="DriveSpeeds"/>).
+/// Apps are always loaded from their shell item.</para>
 /// </remarks>
 public sealed class ShellIconProvider : IIconProvider
 {
@@ -28,11 +34,16 @@ public sealed class ShellIconProvider : IIconProvider
     /// <summary>The size, in DIP, every image reports.</summary>
     private const double DipSize = 32;
 
+    /// <summary>How long one icon request waits for a drive's type before treating the drive as slow.</summary>
+    private static readonly TimeSpan DriveTypeWait = TimeSpan.FromSeconds(1);
+
     private readonly IconCache<ImageSource> cache = new(
         capacity: 400,
         maxWaiting: 32,
         schedule: work => StaThread.Shared.Post(work, DispatcherPriority.Background),
         onError: (_, e) => ShellLog.WarnOnce("Icon load", e));
+
+    private readonly DriveSpeeds drives = new();
 
     /// <inheritdoc/>
     public ImageSource? Cached(SearchItem item)
@@ -43,7 +54,8 @@ public sealed class ShellIconProvider : IIconProvider
         }
         try
         {
-            return cache.TryGet(IconKey.For(item), out ImageSource? image) ? image : null;
+            string? key = item is AppItem ? IconKey.For(item) : KnownFileKey(item.Path);
+            return key is not null && cache.TryGet(key, out ImageSource? image) ? image : null;
         }
         catch (Exception e)
         {
@@ -62,13 +74,70 @@ public sealed class ShellIconProvider : IIconProvider
         try
         {
             string path = item.Path;
-            bool isApp = item is AppItem;
-            return cache.GetAsync(IconKey.For(item), () => Load(path, isApp));
+            if (item is AppItem)
+            {
+                return cache.GetAsync(IconKey.For(item), () => Load(path, isApp: true));
+            }
+            PathVolume volume = VolumePath.Of(path);
+            return KnownSlow(volume) is { } slow ? LoadFile(path, slow) : LoadAfterDriveTypeAsync(path, volume.DriveRoot!);
         }
         catch (Exception e)
         {
             ShellLog.WarnOnce("Icon request", e);
             return Task.FromResult<ImageSource?>(null);
+        }
+    }
+
+    /// <summary>
+    /// Whether a volume may be slow, when that can be told without asking Windows now: a UNC path, or anything that
+    /// is not a drive letter, is slow; a drive's answer is known for a while once <see cref="DriveSpeeds"/> has asked.
+    /// Null when the drive must be asked first. Immediate.
+    /// </summary>
+    private bool? KnownSlow(PathVolume volume) =>
+        volume.Kind == VolumeKind.Drive ? drives.Known(volume.DriveRoot!) : true;
+
+    /// <summary>The cache key of a file, when its volume's speed is known (<see cref="KnownSlow"/>); null otherwise.</summary>
+    private string? KnownFileKey(string path) =>
+        KnownSlow(VolumePath.Of(path)) switch
+        {
+            null => null,
+            true => VolumePath.SlowFileIconKey(path),
+            false => IconKey.ForFile(path),
+        };
+
+    /// <summary>
+    /// A file's icon, keyed as <see cref="VolumePath"/> says. A file on a slow volume gets its type's icon and the
+    /// volume is never touched; any other file gets its own icon from the shell.
+    /// </summary>
+    private Task<ImageSource?> LoadFile(string path, bool slow) =>
+        slow
+            ? cache.GetAsync(VolumePath.SlowFileIconKey(path), () => FromFileType(path))
+            : cache.GetAsync(IconKey.ForFile(path), () => Load(path, isApp: false));
+
+    /// <summary>
+    /// <see cref="LoadFile"/> once the drive's type is known; a drive that does not say within
+    /// <see cref="DriveTypeWait"/> is treated as slow for this request. Never throws.
+    /// </summary>
+    private async Task<ImageSource?> LoadAfterDriveTypeAsync(string path, string root)
+    {
+        try
+        {
+            bool slow;
+            try
+            {
+                slow = await drives.AskAsync(root).WaitAsync(DriveTypeWait).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                ShellLog.WarnOnce("drive type slow " + root, $"Icons: Windows took over {DriveTypeWait.TotalSeconds:0} s to say what kind of drive {root} is; treating it as slow");
+                slow = true;
+            }
+            return await LoadFile(path, slow).ConfigureAwait(false);
+        }
+        catch (Exception e)
+        {
+            ShellLog.WarnOnce("Icon request", e);
+            return null;
         }
     }
 
@@ -244,5 +313,80 @@ public sealed class ShellIconProvider : IIconProvider
         var image = BitmapSource.Create(width, height, dpi, dpi, format, null, pixels, width * 4);
         image.Freeze();
         return image;
+    }
+
+    /// <summary>
+    /// Whether each drive letter may be slow (<see cref="VolumePath.MayBeSlow"/>), asked of Windows at most once per
+    /// root per <see cref="Lifetime"/>, on a thread-pool thread. Thread-safe.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="DriveInfo.DriveType"/> is <c>GetDriveTypeW</c> on the root (<c>Z:\</c>) and nothing else (checked
+    /// in the .NET 10 runtime's IL; no error-mode change, no volume query). For a drive-letter root Windows answers
+    /// from the session's device map, from the type of the device the letter links to, so a mapped drive is
+    /// <c>DRIVE_REMOTE</c> without the server being contacted, connected or not, and a letter that links to nothing
+    /// is <c>DRIVE_NO_ROOT_DIR</c>. That is how Windows behaves as far as known, not something tested here, so
+    /// nothing relies on it: should a drive take long to answer, only its own files' icons wait, at most
+    /// <c>DriveTypeWait</c> before getting their type's icon, with one question per root at a time and never on the
+    /// UI or the shell thread.
+    /// </remarks>
+    private sealed class DriveSpeeds
+    {
+        /// <summary>How long an answer is trusted: a stick can be plugged in or a share mapped to a letter meanwhile.</summary>
+        private static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(3);
+
+        private readonly Lock gate = new();
+        private readonly Dictionary<string, (Task<bool> Answer, long AskedAt)> answers = new(StringComparer.Ordinal);
+
+        /// <summary>The answer for <paramref name="root"/> when it is in and still fresh; null otherwise. Immediate.</summary>
+        public bool? Known(string root)
+        {
+            lock (gate)
+            {
+                return answers.TryGetValue(root, out var entry) && Fresh(entry.AskedAt) && entry.Answer.IsCompletedSuccessfully
+                    ? entry.Answer.Result
+                    : null;
+            }
+        }
+
+        /// <summary>
+        /// The answer for <paramref name="root"/>: the fresh one, the question already on its way, or a new question
+        /// asked on a thread-pool thread. The task never faults.
+        /// </summary>
+        public Task<bool> AskAsync(string root)
+        {
+            lock (gate)
+            {
+                if (answers.TryGetValue(root, out var entry) && (Fresh(entry.AskedAt) || !entry.Answer.IsCompleted))
+                {
+                    return entry.Answer;
+                }
+                Task<bool> asking = Task.Run(() => Ask(root));
+                answers[root] = (asking, Environment.TickCount64);
+                return asking;
+            }
+        }
+
+        private static bool Fresh(long askedAt) => Environment.TickCount64 - askedAt < (long)Lifetime.TotalMilliseconds;
+
+        /// <summary>Asks Windows. A drive whose type cannot be read counts as slow. Never throws.</summary>
+        private static bool Ask(string root)
+        {
+            try
+            {
+                DriveType type = new DriveInfo(root).DriveType;
+                bool slow = VolumePath.MayBeSlow(type);
+                if (slow)
+                {
+                    ShellLog.WarnOnce("slow drive " + root + " " + type,
+                        $"Icons: {root} is a drive of type {type}; its files get their type's icon without touching it");
+                }
+                return slow;
+            }
+            catch (Exception e)
+            {
+                ShellLog.WarnOnce("Drive type", e);
+                return true;
+            }
+        }
     }
 }
