@@ -116,6 +116,7 @@ class CredentialsTest {
             return;
         }
         var view = Files.getFileAttributeView(folder, AclFileAttributeView.class);
+        assumeNarrowable(view.getOwner());
         var acl = new ArrayList<>(view.getAcl());
         acl.add(AclEntry.newBuilder().setType(AclEntryType.ALLOW).setPrincipal(users)
                 .setPermissions(AclEntryPermission.READ_DATA, AclEntryPermission.READ_ATTRIBUTES,
@@ -132,6 +133,15 @@ class CredentialsTest {
         }
     }
 
+    /**
+     * Files made by an elevated process (as on a CI runner, where the Engine runs as an administrator) are owned by
+     * the Administrators group; their permissions are left as they are on purpose, so there is nothing to check.
+     */
+    private static void assumeNarrowable(UserPrincipal owner) {
+        assumeTrue(OwnerOnly.mayNarrowTo(owner),
+                "files here are owned by " + owner.getName() + ", so their permissions are left as they are");
+    }
+
     /** POSIX permissions where the disk has them, else an ACL that allows the owner and nobody else. */
     static void assertOwnerOnly(Path path) throws IOException {
         if (Files.getFileStore(path).supportsFileAttributeView(PosixFileAttributeView.class)) {
@@ -140,6 +150,7 @@ class CredentialsTest {
                     .isEqualTo(Files.isDirectory(path) ? "rwx------" : "rw-------");
         } else {
             UserPrincipal owner = Files.getOwner(path);
+            assumeNarrowable(owner);
             List<AclEntry> acl = Files.getFileAttributeView(path, AclFileAttributeView.class).getAcl();
             assertThat(acl).as("ACL of %s", path).isNotEmpty().allSatisfy(entry -> {
                 assertThat(entry.type()).isEqualTo(AclEntryType.ALLOW);
