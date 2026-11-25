@@ -360,9 +360,17 @@ public final class LucenePassageIndex implements PassageIndex, AutoCloseable {
                 commitScheduled.set(false);
                 try {
                     commit();
-                } catch (UncheckedIOException | AlreadyClosedException e) {
-                    // Closed meanwhile: closing commits. Otherwise the next write or the next start tries again.
-                    LOG.log(System.Logger.Level.DEBUG, "Scheduled commit skipped", e);
+                } catch (AlreadyClosedException e) {
+                    if (writer.getTragicException() == null) {
+                        // Closed meanwhile; closing commits.
+                        LOG.log(System.Logger.Level.DEBUG, "Scheduled commit skipped: the Index is closed");
+                    } else {
+                        LOG.log(System.Logger.Level.WARNING, "Could not save the Index to disk", e);
+                    }
+                } catch (RuntimeException e) {
+                    // For example antivirus or a backup tool holding an index file open. Logged once per failed
+                    // commit; the next write schedules another, and the next start redoes what was not saved.
+                    LOG.log(System.Logger.Level.WARNING, "Could not save the Index to disk; will try again", e);
                 }
             });
         }
