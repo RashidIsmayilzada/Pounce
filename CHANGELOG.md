@@ -17,12 +17,13 @@ Pounce for Windows.
 - **Markdown inside an Obsidian vault opens in Obsidian** on Windows too.
 - **Missing Visual C++ runtime is named**: the tray menu and a notification say to install the Microsoft Visual C++ Redistributable (x64) instead of showing an exit code.
 - **Linux**: the engine and the `pounce` command keep their data in `$XDG_DATA_HOME/pounce` (or `~/.local/share/pounce`) and watch the XDG Documents, Desktop and Downloads folders. There is no Linux app.
-- **UTF-16 text files** with a byte order mark, as PowerShell and Notepad write them, are indexed instead of being found by name only.
+- **Text that is not UTF-8** is indexed instead of being found by name only: UTF-16 with a byte order mark, as PowerShell and Notepad write it, and otherwise windows-1252 ("ANSI"), as many older Windows tools write it.
 
 ### Changed
 
 - The Pounce home folder (`~/Library/Application Support/Pounce` on macOS) is now readable by you only. On Windows an access list does this instead of file permissions.
 - Default Watched Folders that don't exist are skipped instead of being watched.
+- A Watched Folder that is missing for a while (an unplugged disk, a network drive while offline) keeps its files in the index, and they are not read again when it comes back.
 - The index is saved to disk 10 seconds after a change and at the end of every catch-up, not only when the engine stops, so a crash or forced quit loses seconds of indexing, not everything since the start.
 - Windows system files and folders (`$Recycle.Bin`, `System Volume Information`, `desktop.ini`, `Thumbs.db`), Office lock files (`~$report.docx`) and the Pounce home are no longer indexed.
 - Files that OneDrive (or another cloud drive) keeps online only are skipped, so indexing never downloads them; they are read once they are on the disk.
@@ -35,6 +36,8 @@ Pounce for Windows.
 - A file that could not be read when Pounce saw it (held open by another program, for example) is read again at the next change or start, instead of being kept with no text.
 - A folder that can't be read, or a Watched Folder that doesn't exist, no longer stops the indexing of everything else.
 - Renaming a file so that only its letter case changes no longer leaves two results for it.
+- When the system drops file events during a burst of changes (a large sync, unzip or checkout), files deleted or renamed meanwhile are forgotten at once instead of staying findable until the next start.
+- A named pipe in a Watched Folder no longer hangs indexing.
 - A file that becomes excluded (for example by growing past 50 MB) is removed from the index.
 - A Watched Folder inside a hidden folder is indexed, and a Pounce home inside a Watched Folder is no longer indexed into itself.
 - A UTF-8 byte order mark is no longer part of a file's text, so a Markdown file's first heading counts as a heading.
